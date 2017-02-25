@@ -137,6 +137,13 @@ def compile(file, cfile=None, dfile=None, doraise=False, optimize=-1):
     except FileExistsError:
         pass
     source_stats = loader.path_stats(file)
+    sde = os.environ.get('SOURCE_DATE_EPOCH')
+    if sde and source_stats['mtime'] > int(sde):
+        source_stats['mtime'] = int(sde)
+        try:
+            os.utime(file, (source_stats['mtime'], source_stats['mtime']))
+        except PermissionError:
+            pass
     bytecode = importlib._bootstrap_external._code_to_bytecode(
             code, source_stats['mtime'], source_stats['size'])
     mode = importlib._bootstrap_external._calc_mode(file)
