@@ -466,7 +466,7 @@ The :class:`PyZipFile` constructor takes the same parameters as the
       :file:`\*.pyc` are added at the top level.  If the directory is a
       package directory, then all :file:`\*.pyc` are added under the package
       name as a file path, and if any subdirectories are package directories,
-      all of these are added recursively.
+      all of these are added recursively in sorted order.
 
       *basename* is intended for internal use only.
 
@@ -498,6 +498,9 @@ The :class:`PyZipFile` constructor takes the same parameters as the
 
       .. versionchanged:: 3.6.2
          The *pathname* parameter accepts a :term:`path-like object`.
+
+      .. versionchanged:: 3.6.4
+         Recursion sorts directory entries.
 
 
 .. _zipinfo-objects:

@@ -467,6 +467,9 @@ be finalized; only the internally used file object will be closed. See the
       The *exclude* parameter is deprecated, please use the *filter* parameter
       instead.
 
+   .. versionchanged:: 3.6.4
+      Recursion adds entries in sorted order.
+
 
 .. method:: TarFile.addfile(tarinfo, fileobj=None)
 
