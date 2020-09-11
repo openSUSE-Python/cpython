@@ -27,7 +27,12 @@ from sphinx.util.nodes import split_explicit_title
 from sphinx.writers.html import HTMLTranslator
 from sphinx.writers.text import TextWriter, TextTranslator
 from sphinx.writers.latex import LaTeXTranslator
-from sphinx.domains.python import PyModulelevel, PyClassmember
+
+try:
+    from sphinx.domains.python import PyFunction, PyMethod
+except ImportError:
+    from sphinx.domains.python import PyClassmember as PyMethod
+    from sphinx.domains.python import PyModulelevel as PyFunction
 
 # Support for checking for suspicious markup
 
@@ -142,17 +147,18 @@ class PyDecoratorMixin(object):
         return False
 
 
-class PyDecoratorFunction(PyDecoratorMixin, PyModulelevel):
+class PyDecoratorFunction(PyDecoratorMixin, PyFunction):
     def run(self):
         # a decorator function is a function after all
         self.name = 'py:function'
-        return PyModulelevel.run(self)
+        return PyFunction.run(self)
 
 
-class PyDecoratorMethod(PyDecoratorMixin, PyClassmember):
+# TODO: Use sphinx.domains.python.PyDecoratorMethod when possible
+class PyDecoratorMethod(PyDecoratorMixin, PyMethod):
     def run(self):
         self.name = 'py:method'
-        return PyClassmember.run(self)
+        return PyMethod.run(self)
 
 
 class PyCoroutineMixin(object):
@@ -162,19 +168,19 @@ class PyCoroutineMixin(object):
         return ret
 
 
-class PyCoroutineFunction(PyCoroutineMixin, PyModulelevel):
+class PyCoroutineFunction(PyCoroutineMixin, PyFunction):
     def run(self):
         self.name = 'py:function'
-        return PyModulelevel.run(self)
+        return PyFunction.run(self)
 
 
-class PyCoroutineMethod(PyCoroutineMixin, PyClassmember):
+class PyCoroutineMethod(PyCoroutineMixin, PyMethod):
     def run(self):
         self.name = 'py:method'
-        return PyClassmember.run(self)
+        return PyMethod.run(self)
 
 
-class PyAbstractMethod(PyClassmember):
+class PyAbstractMethod(PyMethod):
 
     def handle_signature(self, sig, signode):
         ret = super(PyAbstractMethod, self).handle_signature(sig, signode)
@@ -184,7 +190,7 @@ class PyAbstractMethod(PyClassmember):
 
     def run(self):
         self.name = 'py:method'
-        return PyClassmember.run(self)
+        return PyMethod.run(self)
 
 
 # Support for documenting version of removal in deprecations
