@@ -718,6 +718,20 @@ class _SharedFile:
         self._close = close
         self._lock = lock
         self._writing = writing
+        self.seekable = file.seekable
+
+    def tell(self):
+        return self._pos
+
+    def seek(self, offset, whence=0):
+        with self._lock:
+            if self._writing():
+                raise ValueError("Can't reposition in the ZIP file while "
+                        "there is an open writing handle on it. "
+                        "Close the writing handle before trying to read.")
+            self._file.seek(offset, whence)
+            self._pos = self._file.tell()
+            return self._pos
 
     def read(self, n=-1):
         with self._lock:
