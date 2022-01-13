@@ -13,6 +13,7 @@ import importlib
 import itertools
 import os
 import sys
+import sysconfig
 try:
     import threading
 except ImportError:
@@ -26,8 +27,35 @@ from http.client import HTTPException
 # Were we compiled --with-pydebug or with #define Py_DEBUG?
 COMPILED_WITH_PYDEBUG = hasattr(sys, 'gettotalrefcount')
 
-c_hashlib = import_fresh_module('hashlib', fresh=['_hashlib'])
-py_hashlib = import_fresh_module('hashlib', blocked=['_hashlib'])
+# default builtin hash module
+default_builtin_hashes = {'md5', 'sha1', 'sha256', 'sha512', 'sha3', 'blake2'}
+# --with-builtin-hashlib-hashes override
+builtin_hashes = sysconfig.get_config_var("PY_BUILTIN_HASHLIB_HASHES")
+if builtin_hashes is None:
+    builtin_hashes = default_builtin_hashes
+else:
+    builtin_hashes = {
+        m.strip() for m in builtin_hashes.strip('"').lower().split(",")
+    }
+
+# hashlib with and without OpenSSL backend for PBKDF2
+# only import builtin_hashlib when all builtin hashes are available.
+# Otherwise import prints noise on stderr
+openssl_hashlib = import_fresh_module('hashlib', fresh=['_hashlib'])
+if builtin_hashes == default_builtin_hashes:
+    builtin_hashlib = import_fresh_module('hashlib', blocked=['_hashlib'])
+else:
+    builtin_hashlib = None
+
+try:
+    from _hashlib import HASH, HASHXOF, openssl_md_meth_names, get_fips_mode
+except ImportError:
+    HASH = None
+    HASHXOF = None
+    openssl_md_meth_names = frozenset()
+
+    def get_fips_mode():
+        return 0
 
 try:
     import _blake2
@@ -165,15 +193,9 @@ class HashLibTestCase(unittest.TestCase):
         constructors = self.constructors_to_test.values()
         return itertools.chain.from_iterable(constructors)
 
-    @support.refcount_test
-    @unittest.skipIf(c_hashlib is None, 'Require _hashlib module')
-    def test_refleaks_in_hash___init__(self):
-        gettotalrefcount = support.get_attribute(sys, 'gettotalrefcount')
-        sha1_hash = c_hashlib.new('sha1')
-        refs_before = gettotalrefcount()
-        for i in range(100):
-            sha1_hash.__init__('sha1')
-        self.assertAlmostEqual(gettotalrefcount() - refs_before, 0, delta=10)
+    @property
+    def is_fips_mode(self):
+        return get_fips_mode()
 
     def test_hash_array(self):
         a = array.array("b", range(10))
@@ -927,13 +949,7 @@ class KDFTests(unittest.TestCase):
                     self.assertEqual(out, expected,
                                      (digest_name, password, salt, rounds))
 
-        self.assertRaises(TypeError, pbkdf2, b'sha1', b'pass', b'salt', 1)
-        self.assertRaises(TypeError, pbkdf2, 'sha1', 'pass', 'salt', 1)
-        self.assertRaises(ValueError, pbkdf2, 'sha1', b'pass', b'salt', 0)
-        self.assertRaises(ValueError, pbkdf2, 'sha1', b'pass', b'salt', -1)
-        self.assertRaises(ValueError, pbkdf2, 'sha1', b'pass', b'salt', 1, 0)
-        self.assertRaises(ValueError, pbkdf2, 'sha1', b'pass', b'salt', 1, -1)
-        with self.assertRaisesRegex(ValueError, 'unsupported hash type'):
+        with self.assertRaisesRegex(ValueError, '.*unsupported.*'):
             pbkdf2('unknown', b'pass', b'salt', 1)
         out = pbkdf2(hash_name='sha1', password=b'password', salt=b'salt',
             iterations=1, dklen=None)
@@ -950,6 +966,7 @@ class KDFTests(unittest.TestCase):
 
     @unittest.skipUnless(hasattr(c_hashlib, 'scrypt'),
                      '   test requires OpenSSL > 1.1')
+    @unittest.skipIf(get_fips_mode(), reason="scrypt is blocked in FIPS mode")
     def test_scrypt(self):
         for password, salt, n, r, p, expected in self.scrypt_test_vectors:
             result = hashlib.scrypt(password, salt=salt, n=n, r=r, p=p)
