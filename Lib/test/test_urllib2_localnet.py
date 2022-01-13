@@ -317,7 +317,7 @@ class BasicAuthTests(unittest.TestCase):
         self.assertRaises(urllib.error.HTTPError, urllib.request.urlopen, self.server_url)
 
 
-@unittest.skipUnless(threading, "Threading required for this test.")
+@hashlib_helper.requires_hashdigest("md5", openssl=True)
 class ProxyAuthTests(unittest.TestCase):
     URL = "http://localhost"
 

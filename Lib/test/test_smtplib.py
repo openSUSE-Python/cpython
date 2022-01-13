@@ -1023,6 +1023,45 @@ class SMTPSimTests(unittest.TestCase):
         self.assertEqual(resp, (235, b'Authentication Succeeded'))
         smtp.close()
 
+    def testAUTH_LOGIN_initial_response_ok(self):
+        self.serv.add_feature("AUTH LOGIN")
+        with smtplib.SMTP(HOST, self.port, local_hostname='localhost',
+                          timeout=support.LOOPBACK_TIMEOUT) as smtp:
+            smtp.user, smtp.password = sim_auth
+            smtp.ehlo("test_auth_login")
+            resp = smtp.auth("LOGIN", smtp.auth_login, initial_response_ok=True)
+            self.assertEqual(resp, (235, b'Authentication Succeeded'))
+
+    def testAUTH_LOGIN_initial_response_notok(self):
+        self.serv.add_feature("AUTH LOGIN")
+        with smtplib.SMTP(HOST, self.port, local_hostname='localhost',
+                          timeout=support.LOOPBACK_TIMEOUT) as smtp:
+            smtp.user, smtp.password = sim_auth
+            smtp.ehlo("test_auth_login")
+            resp = smtp.auth("LOGIN", smtp.auth_login, initial_response_ok=False)
+            self.assertEqual(resp, (235, b'Authentication Succeeded'))
+
+    def testAUTH_BUGGY(self):
+        self.serv.add_feature("AUTH BUGGY")
+
+        def auth_buggy(challenge=None):
+            self.assertEqual(b"BuGgYbUgGy", challenge)
+            return "\0"
+
+        smtp = smtplib.SMTP(
+            HOST, self.port, local_hostname='localhost',
+            timeout=support.LOOPBACK_TIMEOUT
+        )
+        try:
+            smtp.user, smtp.password = sim_auth
+            smtp.ehlo("test_auth_buggy")
+            expect = r"^Server AUTH mechanism infinite loop.*"
+            with self.assertRaisesRegex(smtplib.SMTPException, expect) as cm:
+                smtp.auth("BUGGY", auth_buggy, initial_response_ok=False)
+        finally:
+            smtp.close()
+
+    @hashlib_helper.requires_hashdigest('md5', openssl=True)
     def testAUTH_CRAM_MD5(self):
         self.serv.add_feature("AUTH CRAM-MD5")
         smtp = smtplib.SMTP(HOST, self.port, local_hostname='localhost', timeout=15)
@@ -1030,6 +1069,7 @@ class SMTPSimTests(unittest.TestCase):
         self.assertEqual(resp, (235, b'Authentication Succeeded'))
         smtp.close()
 
+    @hashlib_helper.requires_hashdigest('md5', openssl=True)
     def testAUTH_multiple(self):
         # Test that multiple authentication methods are tried.
         self.serv.add_feature("AUTH BOGUS PLAIN LOGIN CRAM-MD5")
