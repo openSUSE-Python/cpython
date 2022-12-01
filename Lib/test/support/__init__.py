@@ -2382,15 +2382,18 @@ class Matcher(object):
             result = dv.find(v) >= 0
         return result
 
-
 _can_symlink = None
 def can_symlink():
     global _can_symlink
     if _can_symlink is not None:
         return _can_symlink
-    symlink_path = TESTFN + "can_symlink"
+    # WASI / wasmtime prevents symlinks with absolute paths, see man
+    # openat2(2) RESOLVE_BENEATH. Almost all symlink tests use absolute
+    # paths. Skip symlink tests on WASI for now.
+    src = os.path.abspath(TESTFN)
+    symlink_path = src + "can_symlink"
     try:
-        os.symlink(TESTFN, symlink_path)
+        os.symlink(src, symlink_path)
         can = True
     except (OSError, NotImplementedError, AttributeError):
         can = False
@@ -2398,6 +2401,7 @@ def can_symlink():
         os.remove(symlink_path)
     _can_symlink = can
     return can
+
 
 def skip_unless_symlink(test):
     """Skip decorator for tests that require functional symlink"""
