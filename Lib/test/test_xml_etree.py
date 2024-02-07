@@ -18,7 +18,8 @@ import weakref
 
 from itertools import product
 from test import support
-from test.support import TESTFN, findfile, import_fresh_module, gc_collect, swap_attr
+from test.support import (TESTFN, findfile, import_fresh_module,
+                          gc_collect, swap_attr, is_expat_2_6_0, fails_with_expat_2_6_0)
 
 # pyET is the pure-Python implementation.
 #
@@ -1047,6 +1048,7 @@ class XMLPullParserTest(unittest.TestCase):
     def test_simple_xml(self):
         for chunk_size in (None, 1, 5):
             with self.subTest(chunk_size=chunk_size):
+                expected_events = []
                 parser = ET.XMLPullParser()
                 self.assert_event_tags(parser, [])
                 self._feed(parser, "<!-- comment -->\n", chunk_size)
@@ -1056,16 +1058,17 @@ class XMLPullParserTest(unittest.TestCase):
                            chunk_size)
                 self.assert_event_tags(parser, [])
                 self._feed(parser, ">\n", chunk_size)
-                self.assert_event_tags(parser, [('end', 'element')])
+                expected_events += [('end', 'element')]
                 self._feed(parser, "<element>text</element>tail\n", chunk_size)
                 self._feed(parser, "<empty-element/>\n", chunk_size)
-                self.assert_event_tags(parser, [
+                expected_events += [
                     ('end', 'element'),
                     ('end', 'empty-element'),
-                    ])
+                    ]
                 self._feed(parser, "</root>\n", chunk_size)
-                self.assert_event_tags(parser, [('end', 'root')])
+                expected_events += [('end', 'root')]
                 self.assertIsNone(parser.close())
+                self.assert_event_tags(parser, expected_events)
 
     def test_feed_while_iterating(self):
         parser = ET.XMLPullParser()
@@ -1668,6 +1671,7 @@ class BugsTest(unittest.TestCase):
                 b"<?xml version='1.0' encoding='ascii'?>\n"
                 b'<body>t&#227;g</body>')
 
+    @unittest.skip('Fails with modern libexpat.')
     def test_issue3151(self):
         e = ET.XML('<prefix:localname xmlns:prefix="${stuff}"/>')
         self.assertEqual(e.tag, '{${stuff}}localname')

@@ -22,7 +22,7 @@ import os.path
 import shutil
 from urllib.error import URLError
 from test import support
-from test.support import findfile, run_unittest, TESTFN
+from test.support import findfile, run_unittest, TESTFN, is_expat_2_6_0
 
 TEST_XMLFILE = findfile("test.xml", subdir="xmltestdata")
 TEST_XMLFILE_OUT = findfile("test.xml.out", subdir="xmltestdata")
@@ -1167,6 +1167,58 @@ class ExpatReaderTest(XmlTestBase):
         parser.close()
 
         self.assertEqual(result.getvalue(), start + b"<doc>text</doc>")
+
+    def test_flush_reparse_deferral_enabled(self):
+        if not is_expat_2_6_0:
+            self.skipTest("Linked libexpat doesn't support reparse deferral")
+
+        result = BytesIO()
+        xmlgen = XMLGenerator(result)
+        parser = create_parser()
+        parser.setContentHandler(xmlgen)
+
+        for chunk in ("<doc", ">"):
+            parser.feed(chunk)
+
+        self.assertEqual(result.getvalue(), start)  # i.e. no elements started
+        self.assertTrue(parser._parser.GetReparseDeferralEnabled())
+
+        parser.flush()
+
+        self.assertTrue(parser._parser.GetReparseDeferralEnabled())
+        self.assertEqual(result.getvalue(), start + b"<doc>")
+
+        parser.feed("</doc>")
+        parser.close()
+
+        self.assertEqual(result.getvalue(), start + b"<doc></doc>")
+
+    def test_flush_reparse_deferral_disabled(self):
+        if not is_expat_2_6_0:
+            self.skipTest("Linked libexpat doesn't support reparse deferral")
+
+        result = BytesIO()
+        xmlgen = XMLGenerator(result)
+        parser = create_parser()
+        parser.setContentHandler(xmlgen)
+
+        for chunk in ("<doc", ">"):
+            parser.feed(chunk)
+
+        parser._parser.SetReparseDeferralEnabled(False)
+        self.assertEqual(result.getvalue(), start)  # i.e. no elements started
+
+        self.assertFalse(parser._parser.GetReparseDeferralEnabled())
+
+        parser.flush()
+
+        self.assertFalse(parser._parser.GetReparseDeferralEnabled())
+        self.assertEqual(result.getvalue(), start + b"<doc>")
+
+        parser.feed("</doc>")
+        parser.close()
+
+        self.assertEqual(result.getvalue(), start + b"<doc></doc>")
 
     # ===== Locator support
 

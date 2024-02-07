@@ -21,6 +21,7 @@ import platform
 import re
 import shutil
 import socket
+import pyexpat
 import stat
 import struct
 import subprocess
@@ -112,6 +113,7 @@ __all__ = [
     "run_with_locale", "swap_item",
     "swap_attr", "Matcher", "set_memlimit", "SuppressCrashReport", "sortdict",
     "run_with_tz", "PGO", "missing_compiler_executable", "fd_count",
+    "fails_with_expat_2_6_0", "is_expat_2_6_0"
     ]
 
 class Error(Exception):
@@ -2882,3 +2884,13 @@ def adjust_int_max_str_digits(max_digits):
         yield
     finally:
         sys.set_int_max_str_digits(current)
+
+
+@functools.lru_cache(maxsize=32)
+def _is_expat_2_6_0():
+    return hasattr(pyexpat.ParserCreate(), 'SetReparseDeferralEnabled')
+is_expat_2_6_0 = _is_expat_2_6_0()
+
+fails_with_expat_2_6_0 = (unittest.expectedFailure
+                          if is_expat_2_6_0
+                          else lambda test: test)
