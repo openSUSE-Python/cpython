@@ -38,6 +38,11 @@ try:
 except ImportError:
     from asyncio import test_support as support
 
+if ssl is not None:
+    from test.test_ssl import IS_OPENSSL_1_1_1
+else:
+    IS_OPENSSL_1_1_1 = False
+
 
 def osx_tiger():
     """Return True if the platform is Mac OS 10.4 or older."""
@@ -1161,6 +1166,7 @@ class EventLoopTestsMixin:
             self.test_create_unix_server_ssl_verify_failed()
 
     @unittest.skipIf(ssl is None, 'No ssl module')
+    @unittest.skipIf(IS_OPENSSL_1_1_1, "bpo-36576: fail on OpenSSL 1.1.1")
     def test_create_server_ssl_match_failed(self):
         proto = MyProto(loop=self.loop)
         server, host, port = self._make_ssl_server(
