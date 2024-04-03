@@ -857,30 +857,30 @@ class PyZipFileTests(unittest.TestCase):
         packagedir = os.path.dirname(test.__file__)
         self.requiresWriteAccess(packagedir)
 
-        with TemporaryFile() as t, zipfile.PyZipFile(t, "w") as zipfp:
+        with TemporaryFile() as t:
+            with zipfile.PyZipFile(t, "w") as zipfp:
+                # first make sure that the test folder gives error messages
+                # (on the badsyntax_... files)
+                with captured_stdout() as reportSIO:
+                    zipfp.writepy(packagedir)
+                reportStr = reportSIO.getvalue()
+                self.assertIn('SyntaxError', reportStr)
 
-            # first make sure that the test folder gives error messages
-            # (on the badsyntax_... files)
-            with captured_stdout() as reportSIO:
-                zipfp.writepy(packagedir)
-            reportStr = reportSIO.getvalue()
-            self.assertTrue('SyntaxError' in reportStr)
+                # then check that the filter works on the whole package
+                with captured_stdout() as reportSIO:
+                    zipfp.writepy(packagedir, filterfunc=lambda whatever: False)
+                reportStr = reportSIO.getvalue()
+                self.assertNotIn('SyntaxError', reportStr)
 
-            # then check that the filter works on the whole package
-            with captured_stdout() as reportSIO:
-                zipfp.writepy(packagedir, filterfunc=lambda whatever: False)
-            reportStr = reportSIO.getvalue()
-            self.assertTrue('SyntaxError' not in reportStr)
-
-            # then check that the filter works on individual files
-            def filter(path):
-                return not os.path.basename(path).startswith("bad")
-            with captured_stdout() as reportSIO, self.assertWarns(UserWarning):
-                zipfp.writepy(packagedir, filterfunc=filter)
-            reportStr = reportSIO.getvalue()
-            if reportStr:
-                print(reportStr)
-            self.assertTrue('SyntaxError' not in reportStr)
+                # then check that the filter works on individual files
+                def filter(path):
+                    return not os.path.basename(path).startswith("bad")
+                with captured_stdout() as reportSIO, self.assertWarns(UserWarning):
+                    zipfp.writepy(packagedir, filterfunc=filter)
+                reportStr = reportSIO.getvalue()
+                if reportStr:
+                    print(reportStr)
+                self.assertNotIn('SyntaxError', reportStr)
 
     def test_write_with_optimization(self):
         import email
