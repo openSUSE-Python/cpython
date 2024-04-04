@@ -96,6 +96,12 @@ OP_SINGLE_ECDH_USE = getattr(ssl, "OP_SINGLE_ECDH_USE", 0)
 OP_CIPHER_SERVER_PREFERENCE = getattr(ssl, "OP_CIPHER_SERVER_PREFERENCE", 0)
 OP_ENABLE_MIDDLEBOX_COMPAT = getattr(ssl, "OP_ENABLE_MIDDLEBOX_COMPAT", 0)
 
+def clean_OpenSSL30_san(in_tup):
+    if ssl._OPENSSL_API_VERSION >= (3, 0, 0):
+        return tuple([(x,y.strip() if type(y) == str else y)
+                      for x, y in in_tup])
+    else:
+        return in_tup
 
 def handle_error(prefix):
     exc_format = ' '.join(traceback.format_exception(*sys.exc_info()))
@@ -377,29 +383,29 @@ class BasicSocketTests(unittest.TestCase):
                    ('URI', 'http://null.python.org\x00http://example.org'),
                    ('IP Address', '192.0.2.1'),
                    ('IP Address', '<invalid>'))
+        san = clean_OpenSSL30_san(san)
 
         self.assertEqual(p['subjectAltName'], san)
 
     def test_parse_all_sans(self):
         p = ssl._ssl._test_decode_cert(ALLSANFILE)
-        self.assertEqual(p['subjectAltName'],
-            (
-                ('DNS', 'allsans'),
-                ('othername', '<unsupported>'),
-                ('othername', '<unsupported>'),
-                ('email', 'user@example.org'),
-                ('DNS', 'www.example.org'),
-                ('DirName',
-                    ((('countryName', 'XY'),),
-                    (('localityName', 'Castle Anthrax'),),
-                    (('organizationName', 'Python Software Foundation'),),
-                    (('commonName', 'dirname example'),))),
-                ('URI', 'https://www.python.org/'),
-                ('IP Address', '127.0.0.1'),
-                ('IP Address', '0:0:0:0:0:0:0:1\n'),
-                ('Registered ID', '1.2.3.4.5')
-            )
-        )
+        expected = clean_OpenSSL30_san((
+            ('DNS', 'allsans'),
+            ('othername', '<unsupported>'),
+            ('othername', '<unsupported>'),
+            ('email', 'user@example.org'),
+            ('DNS', 'www.example.org'),
+            ('DirName',
+                ((('countryName', 'XY'),),
+                (('localityName', 'Castle Anthrax'),),
+                (('organizationName', 'Python Software Foundation'),),
+                (('commonName', 'dirname example'),))),
+            ('URI', 'https://www.python.org/'),
+            ('IP Address', '127.0.0.1'),
+            ('IP Address', '0:0:0:0:0:0:0:1\n'),
+            ('Registered ID', '1.2.3.4.5')
+        ))
+        self.assertEqual(p['subjectAltName'], expected)
 
     def test_DER_to_PEM(self):
         with open(CAFILE_CACERT, 'r') as f:
@@ -423,11 +429,11 @@ class BasicSocketTests(unittest.TestCase):
         # Some sanity checks follow
         # >= 0.9
         self.assertGreaterEqual(n, 0x900000)
-        # < 3.0
-        self.assertLess(n, 0x30000000)
+        # < 3.3
+        self.assertLess(n, 0x33000000)
         major, minor, fix, patch, status = t
         self.assertGreaterEqual(major, 0)
-        self.assertLess(major, 3)
+        self.assertLess(major, 4)
         self.assertGreaterEqual(minor, 0)
         self.assertLess(minor, 256)
         self.assertGreaterEqual(fix, 0)
