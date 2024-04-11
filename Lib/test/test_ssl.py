@@ -982,7 +982,8 @@ class ContextTests(unittest.TestCase):
         # SSLContext also enables these by default
         default |= (OP_NO_COMPRESSION | OP_CIPHER_SERVER_PREFERENCE |
                     OP_SINGLE_DH_USE | OP_SINGLE_ECDH_USE |
-                    OP_ENABLE_MIDDLEBOX_COMPAT)
+                    OP_ENABLE_MIDDLEBOX_COMPAT |
+                    OP_IGNORE_UNEXPECTED_EOF)
         self.assertEqual(default, ctx.options)
         ctx.options |= ssl.OP_NO_TLSv1
         self.assertEqual(default | ssl.OP_NO_TLSv1, ctx.options)
