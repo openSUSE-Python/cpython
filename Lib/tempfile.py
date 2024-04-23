@@ -313,6 +313,23 @@ def _resetperms(path):
     _dont_follow_symlinks(_os.chmod, path, 0o700)
 
 
+def _dont_follow_symlinks(func, path, *args):
+    # Pass follow_symlinks=False, unless not supported on this platform.
+    if func in _os.supports_follow_symlinks:
+        func(path, *args, follow_symlinks=False)
+    elif _os.name == 'nt' or not _os.path.islink(path):
+        func(path, *args)
+
+
+def _resetperms(path):
+    try:
+        chflags = _os.chflags
+    except AttributeError:
+        pass
+    else:
+        _dont_follow_symlinks(chflags, path, 0)
+    _dont_follow_symlinks(_os.chmod, path, 0o700)
+
 # User visible interfaces.
 
 def gettempprefix():
