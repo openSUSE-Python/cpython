@@ -1,0 +1,52 @@
+name: Build and Test
+
+on:
+  push:
+    branches:
+        - 'opensuse_3.6*'
+  pull_request:
+    branches:
+        - 'opensuse_3.6*'
+
+jobs:
+  build_and_test:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        docker: [opensuse/leap]
+
+    container: ${{ matrix.docker }}
+
+    steps:
+      - run: zypper -n install
+              rpm-build
+              pkg-config
+              autoconf-archive
+              ccache
+              gdb
+              lcov
+              gdbm-devel
+              libbz2-devel
+              libb2-devel
+              libffi-devel
+              liblzma5
+              libopenssl-1_1-devel
+              mpdecimal-devel
+              ncurses5-devel
+              readline6-devel
+              sqlite3-devel
+              strace
+              tk-devel
+              uuid-devel
+              xvfb-run
+              xz-devel
+              zlib-devel
+      - uses: actions/checkout@v4
+      - name: Build
+        run: |
+          ./configure --with-pydebug
+          make -j
+      - name: Test
+        run: |
+          ./python -m test -j1 -W
