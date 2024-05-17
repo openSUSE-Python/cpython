@@ -9,20 +9,19 @@ zypper -nq install \
     ccache \
     gdb \
     lcov \
-    libb2-devel \
-    libbz2-devel \
-    libffi-devel \
     gdbm-devel \
-    xz-devel \
+    libbz2-devel \
+    libb2-devel \
+    libffi-devel \
+    liblzma5 \
+    libopenssl-3-devel \
     mpdecimal-devel \
     ncurses5-devel \
-    eadline6-devel \
+    readline6-devel \
     sqlite3-devel \
-    libopenssl-1_1-devel \
-    liblzma5 \
     strace \
     tk-devel \
     uuid-devel \
-    xvfb \
+    xvfb-run \
+    xz-devel \
     zlib-devel
-    # libgdbm-compat-devel \
