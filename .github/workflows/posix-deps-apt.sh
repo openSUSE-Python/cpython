@@ -13,7 +13,6 @@ zypper -nq install \
     libbz2-devel \
     libffi-devel \
     gdbm-devel \
-    # libgdbm-compat-devel \
     xz-devel \
     mpdecimal-devel \
     ncurses5-devel \
@@ -26,3 +25,4 @@ zypper -nq install \
     uuid-devel \
     xvfb \
     zlib-devel
+    # libgdbm-compat-devel \
