@@ -148,16 +148,10 @@ struct py_ssl_library_code {
  * reasons. The check for TLSEXT_TYPE_next_proto_neg works with
  * OpenSSL 1.0.1+ and LibreSSL.
  * OpenSSL 1.1.1-pre1 dropped NPN but still has TLSEXT_TYPE_next_proto_neg.
+ *
+ * Fix for CVE-2024-5642: we just switch NPN completely
  */
-#ifdef OPENSSL_NO_NEXTPROTONEG
 # define HAVE_NPN 0
-#elif (OPENSSL_VERSION_NUMBER >= 0x10101000L) && !defined(LIBRESSL_VERSION_NUMBER)
-# define HAVE_NPN 0
-#elif defined(TLSEXT_TYPE_next_proto_neg)
-# define HAVE_NPN 1
-#else
-# define HAVE_NPN 0
-#endif
 
 #ifndef INVALID_SOCKET /* MS defines this */
 #define INVALID_SOCKET (-1)
