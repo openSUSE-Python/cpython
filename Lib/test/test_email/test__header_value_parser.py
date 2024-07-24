@@ -118,7 +118,7 @@ class TestParser(TestParserMixin, TestEmailBase):
                          '=?us-ascii?q?first?==?utf-8?q?second?=',
                          'first',
                          'first',
-                         [],
+                         [errors.InvalidHeaderDefect],
                          '=?utf-8?q?second?=')
 
     def test_get_encoded_word_sets_extra_attributes(self):
@@ -361,7 +361,7 @@ class TestParser(TestParserMixin, TestEmailBase):
             '=?utf-8?q?foo?==?utf-8?q?bar?=',
             'foobar',
             'foobar',
-            [errors.InvalidHeaderDefect],
+            [errors.InvalidHeaderDefect, errors.InvalidHeaderDefect],
             '')
 
     # get_qp_ctext
@@ -546,7 +546,7 @@ class TestParser(TestParserMixin, TestEmailBase):
             '"=?utf-8?Q?not_really_valid?="',
             '"not really valid"',
             'not really valid',
-            [errors.InvalidHeaderDefect],
+            [errors.InvalidHeaderDefect, errors.InvalidHeaderDefect],
             '')
 
     # get_comment
