@@ -48,4 +48,6 @@ jobs:
           ./configure --with-pydebug
           make -j
       - name: Test
-        run: ./python -m test -j1 -W
+        run: |
+          export LANG=en_GB.utf8
+          ./python -m test -j1 -W
