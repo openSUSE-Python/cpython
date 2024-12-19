@@ -31,7 +31,7 @@ jobs:
               libb2-devel
               libffi-devel
               liblzma5
-              libopenssl-3-devel
+              libopenssl-1_1-devel
               mpdecimal-devel
               ncurses5-devel
               readline6-devel
