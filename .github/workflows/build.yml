@@ -48,4 +48,5 @@ jobs:
           ./configure --with-pydebug
           make -j
       - name: Test
-        run: ./python -m test -j1
+        run: |
+          ./python -m test -j1 -W
