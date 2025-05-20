@@ -594,7 +594,7 @@ exit:
 }
 
 PyDoc_STRVAR(_codecs_unicode_escape_decode__doc__,
-"unicode_escape_decode($module, data, errors=None, /)\n"
+"unicode_escape_decode($module, data, errors=None, final=True, /)\n"
 "--\n"
 "\n");
 
@@ -603,20 +603,21 @@ PyDoc_STRVAR(_codecs_unicode_escape_decode__doc__,
 
 static PyObject *
 _codecs_unicode_escape_decode_impl(PyObject *module, Py_buffer *data,
-                                   const char *errors);
+                                   const char *errors, int final);
 
 static PyObject *
 _codecs_unicode_escape_decode(PyObject *module, PyObject *args)
 {
     PyObject *return_value = NULL;
-    Py_buffer data = {NULL, NULL};
+    Py_buffer data = {0};
     const char *errors = NULL;
+    int final = 1;
 
-    if (!PyArg_ParseTuple(args, "s*|z:unicode_escape_decode",
-        &data, &errors)) {
+    if (!PyArg_ParseTuple(args, "s*|zp:unicode_escape_decode",
+        &data, &errors, &final)) {
         goto exit;
     }
-    return_value = _codecs_unicode_escape_decode_impl(module, &data, errors);
+    return_value = _codecs_unicode_escape_decode_impl(module, &data, errors, final);
 
 exit:
     /* Cleanup for data */
@@ -628,7 +629,7 @@ exit:
 }
 
 PyDoc_STRVAR(_codecs_raw_unicode_escape_decode__doc__,
-"raw_unicode_escape_decode($module, data, errors=None, /)\n"
+"raw_unicode_escape_decode($module, data, errors=None, final=True, /)\n"
 "--\n"
 "\n");
 
@@ -637,20 +638,21 @@ PyDoc_STRVAR(_codecs_raw_unicode_escape_decode__doc__,
 
 static PyObject *
 _codecs_raw_unicode_escape_decode_impl(PyObject *module, Py_buffer *data,
-                                       const char *errors);
+                                       const char *errors, int final);
 
 static PyObject *
 _codecs_raw_unicode_escape_decode(PyObject *module, PyObject *args)
 {
     PyObject *return_value = NULL;
-    Py_buffer data = {NULL, NULL};
+    Py_buffer data = {0};
     const char *errors = NULL;
+    int final = 1;
 
-    if (!PyArg_ParseTuple(args, "s*|z:raw_unicode_escape_decode",
-        &data, &errors)) {
+    if (!PyArg_ParseTuple(args, "s*|zp:raw_unicode_escape_decode",
+        &data, &errors, &final)) {
         goto exit;
     }
-    return_value = _codecs_raw_unicode_escape_decode_impl(module, &data, errors);
+    return_value = _codecs_raw_unicode_escape_decode_impl(module, &data, errors, final);
 
 exit:
     /* Cleanup for data */
@@ -1536,4 +1538,4 @@ exit:
 #ifndef _CODECS_CODE_PAGE_ENCODE_METHODDEF
     #define _CODECS_CODE_PAGE_ENCODE_METHODDEF
 #endif /* !defined(_CODECS_CODE_PAGE_ENCODE_METHODDEF) */
-/*[clinic end generated code: output=6d6afcabde10ed79 input=a9049054013a1b77]*/
+/*[clinic end generated code: output=304d4afdb776a218 input=a9049054013a1b77]*/

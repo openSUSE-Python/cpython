@@ -66,7 +66,7 @@ PyAPI_FUNC(PyObject *) PyLong_GetInfo(void);
 #endif /* SIZEOF_VOID_P */
 
 /* Used by Python/mystrtoul.c, _PyBytes_FromHex(),
-   _PyBytes_DecodeEscapeRecode(), etc. */
+   _PyBytes_DecodeEscape(), etc. */
 #ifndef Py_LIMITED_API
 PyAPI_DATA(unsigned char) _PyLong_DigitValue[256];
 #endif

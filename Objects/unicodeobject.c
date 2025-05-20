@@ -5998,21 +5998,28 @@ PyUnicode_AsUTF16String(PyObject *unicode)
 static _PyUnicode_Name_CAPI *ucnhash_CAPI = NULL;
 
 PyObject *
-_PyUnicode_DecodeUnicodeEscape(const char *s,
+_PyUnicode_DecodeUnicodeEscapeInternal2(const char *s,
                                Py_ssize_t size,
                                const char *errors,
-                               const char **first_invalid_escape)
+                               Py_ssize_t *consumed,
+                               int *first_invalid_escape_char,
+                               const char **first_invalid_escape_ptr)
 {
     const char *starts = s;
+    const char *initial_starts = starts;
     _PyUnicodeWriter writer;
     const char *end;
     PyObject *errorHandler = NULL;
     PyObject *exc = NULL;
 
     // so we can remember if we've seen an invalid escape char or not
-    *first_invalid_escape = NULL;
+    *first_invalid_escape_char = -1;
+    *first_invalid_escape_ptr = NULL;
 
     if (size == 0) {
+        if (consumed) {
+            *consumed = 0;
+        }
         _Py_RETURN_UNICODE_EMPTY();
     }
     /* Escaped strings will always be longer than the resulting
@@ -6031,8 +6038,6 @@ _PyUnicode_DecodeUnicodeEscape(const char *s,
         unsigned char c = (unsigned char) *s++;
         Py_UCS4 ch;
         int count;
-        Py_ssize_t startinpos;
-        Py_ssize_t endinpos;
         const char *message;
 
 #define WRITE_ASCII_CHAR(ch)                                                  \
@@ -6059,11 +6064,11 @@ _PyUnicode_DecodeUnicodeEscape(const char *s,
             continue;
         }
 
-        startinpos = s - starts - 1;
+        Py_ssize_t startinpos = s - starts - 1;
         /* \ - Escapes */
         if (s >= end) {
             message = "\\ at end of string";
-            goto error;
+            goto incomplete;
         }
         c = (unsigned char) *s++;
 
@@ -6117,7 +6122,10 @@ _PyUnicode_DecodeUnicodeEscape(const char *s,
             count = 8;
             message = "truncated \\UXXXXXXXX escape";
         hexescape:
-            for (ch = 0; count && s < end; ++s, --count) {
+            for (ch = 0; count; ++s, --count) {
+                if (s >= end) {
+                    goto incomplete;
+                }
                 c = (unsigned char)*s;
                 ch <<= 4;
                 if (c >= '0' && c <= '9') {
@@ -6130,11 +6138,8 @@ _PyUnicode_DecodeUnicodeEscape(const char *s,
                     ch += c - ('A' - 10);
                 }
                 else {
-                    break;
+                    goto error;
                 }
-            }
-            if (count) {
-                goto error;
             }
 
             /* when we get here, ch is a 32-bit unicode character */
@@ -6162,14 +6167,20 @@ _PyUnicode_DecodeUnicodeEscape(const char *s,
             }
 
             message = "malformed \\N character escape";
-            if (s < end && *s == '{') {
+            if (s >= end) {
+                goto incomplete;
+            }
+            if (*s == '{') {
                 const char *start = ++s;
                 size_t namelen;
                 /* look for the closing brace */
                 while (s < end && *s != '}')
                     s++;
+                if (s >= end) {
+                    goto incomplete;
+                }
                 namelen = s - start;
-                if (namelen && s < end) {
+                if (namelen) {
                     /* found a name.  look it up in the unicode database */
                     s++;
                     ch = 0xffffffff; /* in case 'getcode' messes up */
@@ -6186,17 +6197,25 @@ _PyUnicode_DecodeUnicodeEscape(const char *s,
             goto error;
 
         default:
-            if (*first_invalid_escape == NULL) {
-                *first_invalid_escape = s-1; /* Back up one char, since we've
-                                                already incremented s. */
+            if (*first_invalid_escape_char == -1) {
+                *first_invalid_escape_char = c;
+                if (starts == initial_starts) {
+                    /* Back up one char, since we've already incremented s. */
+                    *first_invalid_escape_ptr = s - 1;
+                }
             }
             WRITE_ASCII_CHAR('\\');
             WRITE_CHAR(c);
             continue;
         }
 
-      error:
-        endinpos = s-starts;
+      incomplete:
+        if (consumed) {
+            *consumed = startinpos;
+            break;
+        }
+      error:;
+        Py_ssize_t endinpos = s-starts;
         writer.min_length = end - s + writer.pos;
         if (unicode_decode_call_errorhandler_writer(
                 errors, &errorHandler,
@@ -6222,25 +6241,52 @@ _PyUnicode_DecodeUnicodeEscape(const char *s,
     return NULL;
 }
 
+// Export for binary compatibility.
 PyObject *
-PyUnicode_DecodeUnicodeEscape(const char *s,
-                              Py_ssize_t size,
-                              const char *errors)
+_PyUnicode_DecodeUnicodeEscapeInternal(const char *s,
+                               Py_ssize_t size,
+                               const char *errors,
+                               Py_ssize_t *consumed,
+                               const char **first_invalid_escape)
 {
-    const char *first_invalid_escape;
-    PyObject *result = _PyUnicode_DecodeUnicodeEscape(s, size, errors,
-                                                      &first_invalid_escape);
+    int first_invalid_escape_char;
+    return _PyUnicode_DecodeUnicodeEscapeInternal2(
+            s, size, errors, consumed,
+            &first_invalid_escape_char,
+            first_invalid_escape);
+}
+
+PyObject *
+_PyUnicode_DecodeUnicodeEscapeStateful(const char *s,
+                              Py_ssize_t size,
+                              const char *errors,
+                              Py_ssize_t *consumed)
+{
+    int first_invalid_escape_char;
+    const char *first_invalid_escape_ptr;
+    PyObject *result = _PyUnicode_DecodeUnicodeEscapeInternal2(s, size, errors,
+                                                      consumed,
+                                                      &first_invalid_escape_char,
+                                                      &first_invalid_escape_ptr);
     if (result == NULL)
         return NULL;
-    if (first_invalid_escape != NULL) {
+    if (first_invalid_escape_char != -1) {
         if (PyErr_WarnFormat(PyExc_DeprecationWarning, 1,
                              "invalid escape sequence '\\%c'",
-                             (unsigned char)*first_invalid_escape) < 0) {
+                             first_invalid_escape_char) < 0) {
             Py_DECREF(result);
             return NULL;
         }
     }
     return result;
+}
+
+PyObject *
+PyUnicode_DecodeUnicodeEscape(const char *s,
+                              Py_ssize_t size,
+                              const char *errors)
+{
+    return _PyUnicode_DecodeUnicodeEscapeStateful(s, size, errors, NULL);
 }
 
 /* Return a Unicode-Escape string version of the Unicode object. */
@@ -6379,6 +6425,142 @@ PyUnicode_EncodeUnicodeEscape(const Py_UNICODE *s,
 }
 
 /* --- Raw Unicode Escape Codec ------------------------------------------- */
+
+PyObject *
+_PyUnicode_DecodeRawUnicodeEscapeStateful(const char *s,
+                                          Py_ssize_t size,
+                                          const char *errors,
+                                          Py_ssize_t *consumed)
+{
+    const char *starts = s;
+    _PyUnicodeWriter writer;
+    const char *end;
+    PyObject *errorHandler = NULL;
+    PyObject *exc = NULL;
+
+    if (size == 0) {
+        if (consumed) {
+            *consumed = 0;
+        }
+        _Py_RETURN_UNICODE_EMPTY();
+    }
+
+    /* Escaped strings will always be longer than the resulting
+       Unicode string, so we start with size here and then reduce the
+       length after conversion to the true value. (But decoding error
+       handler might have to resize the string) */
+    _PyUnicodeWriter_Init(&writer);
+    writer.min_length = size;
+    if (_PyUnicodeWriter_Prepare(&writer, size, 127) < 0) {
+        goto onError;
+    }
+
+    end = s + size;
+    while (s < end) {
+        unsigned char c = (unsigned char) *s++;
+        Py_UCS4 ch;
+        int count;
+        const char *message;
+
+#define WRITE_CHAR(ch)                                                        \
+            do {                                                              \
+                if (ch <= writer.maxchar) {                                   \
+                    assert(writer.pos < writer.size);                         \
+                    PyUnicode_WRITE(writer.kind, writer.data, writer.pos++, ch); \
+                }                                                             \
+                else if (_PyUnicodeWriter_WriteCharInline(&writer, ch) < 0) { \
+                    goto onError;                                             \
+                }                                                             \
+            } while(0)
+
+        /* Non-escape characters are interpreted as Unicode ordinals */
+        if (c != '\\' || (s >= end && !consumed)) {
+            WRITE_CHAR(c);
+            continue;
+        }
+
+        Py_ssize_t startinpos = s - starts - 1;
+        /* \ - Escapes */
+        if (s >= end) {
+            assert(consumed);
+            // Set message to silent compiler warning.
+            // Actually it is never used.
+            message = "\\ at end of string";
+            goto incomplete;
+        }
+
+        c = (unsigned char) *s++;
+        if (c == 'u') {
+            count = 4;
+            message = "truncated \\uXXXX escape";
+        }
+        else if (c == 'U') {
+            count = 8;
+            message = "truncated \\UXXXXXXXX escape";
+        }
+        else {
+            assert(writer.pos < writer.size);
+            PyUnicode_WRITE(writer.kind, writer.data, writer.pos++, '\\');
+            WRITE_CHAR(c);
+            continue;
+        }
+
+        /* \uHHHH with 4 hex digits, \U00HHHHHH with 8 */
+        for (ch = 0; count; ++s, --count) {
+            if (s >= end) {
+                goto incomplete;
+            }
+            c = (unsigned char)*s;
+            ch <<= 4;
+            if (c >= '0' && c <= '9') {
+                ch += c - '0';
+            }
+            else if (c >= 'a' && c <= 'f') {
+                ch += c - ('a' - 10);
+            }
+            else if (c >= 'A' && c <= 'F') {
+                ch += c - ('A' - 10);
+            }
+            else {
+                goto error;
+            }
+        }
+        if (ch > MAX_UNICODE) {
+            message = "\\Uxxxxxxxx out of range";
+            goto error;
+        }
+        WRITE_CHAR(ch);
+        continue;
+
+      incomplete:
+        if (consumed) {
+            *consumed = startinpos;
+            break;
+        }
+      error:;
+        Py_ssize_t endinpos = s-starts;
+        writer.min_length = end - s + writer.pos;
+        if (unicode_decode_call_errorhandler_writer(
+                errors, &errorHandler,
+                "rawunicodeescape", message,
+                &starts, &end, &startinpos, &endinpos, &exc, &s,
+                &writer)) {
+            goto onError;
+        }
+        assert(end - s <= writer.size - writer.pos);
+
+#undef WRITE_CHAR
+    }
+    Py_XDECREF(errorHandler);
+    Py_XDECREF(exc);
+    return _PyUnicodeWriter_Finish(&writer);
+
+  onError:
+    _PyUnicodeWriter_Dealloc(&writer);
+    Py_XDECREF(errorHandler);
+    Py_XDECREF(exc);
+    return NULL;
+}
 
 PyObject *
 PyUnicode_DecodeRawUnicodeEscape(const char *s,
