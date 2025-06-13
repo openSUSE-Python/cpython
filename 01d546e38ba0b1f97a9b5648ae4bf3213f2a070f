@@ -15,3 +15,18 @@ The expected install locations for pip3 should be:
     --prefix and --root : ${ROOT}${PREFIX}/bin/pip3 with shebang #!${PREFIX}/bin/python3
 
 (And all that with various values of `with-ensurepip` `./configure` option)
+
+---
+
+@pfmoore:
+
+    @JasonGantner Thanks for the summary. Given that, and the
+    lack of any further activity from @ZackerySpytz or anyone else
+    interested in taking this PR forward, I'm going to close the
+    PR. If anyone wants this functionality, they can create a new PR,
+    either building on this one, or starting from scratch.
+
+    I understand the need for the functionality, and would
+    support someone working on this, but it doesn't seem to be a
+    simple change, so it needs someone able and willing to do the
+    necessary work.
