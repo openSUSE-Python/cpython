@@ -709,9 +709,13 @@ class SimpleServerTestCase(BaseServerTestCase):
 
     def test_partial_post(self):
         # Check that a partial POST doesn't make the server loop: issue #14001.
-        conn = http.client.HTTPConnection(ADDR, PORT)
-        conn.request('POST', '/RPC2 HTTP/1.0\r\nContent-Length: 100\r\n\r\nbye')
-        conn.close()
+        with contextlib.closing(socket.create_connection((ADDR, PORT))) as conn:
+            conn.send(('POST /RPC2 HTTP/1.0\r\n' +
+                      'Content-Length: 100\r\n\r\n' +
+                      'bye HTTP/1.1\r\n' +
+                      'Host: {}:{}\r\n'.format(ADDR,PORT) +
+                      'Accept-Encoding: identity\r\n' +
+                      'Content-Length: 0\r\n\r\n').encode('ascii'))
 
 
 class MultiPathServerTestCase(BaseServerTestCase):
