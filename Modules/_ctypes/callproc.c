@@ -446,57 +446,58 @@ PyCArg_dealloc(PyCArgObject *self)
     PyObject_Del(self);
 }
 
+static int
+is_literal_char(unsigned char c)
+{
+    return c < 128 && _PyUnicode_IsPrintable(c) && c != '\\' && c != '\'';
+}
+
 static PyObject *
 PyCArg_repr(PyCArgObject *self)
 {
-    char buffer[256];
     switch(self->tag) {
     case 'b':
     case 'B':
-        sprintf(buffer, "<cparam '%c' (%d)>",
+        return PyUnicode_FromFormat("<cparam '%c' (%d)>",
             self->tag, self->value.b);
-        break;
     case 'h':
     case 'H':
-        sprintf(buffer, "<cparam '%c' (%d)>",
+        return PyUnicode_FromFormat("<cparam '%c' (%d)>",
             self->tag, self->value.h);
-        break;
     case 'i':
     case 'I':
-        sprintf(buffer, "<cparam '%c' (%d)>",
+        return PyUnicode_FromFormat("<cparam '%c' (%d)>",
             self->tag, self->value.i);
-        break;
     case 'l':
     case 'L':
-        sprintf(buffer, "<cparam '%c' (%ld)>",
+        return PyUnicode_FromFormat("<cparam '%c' (%ld)>",
             self->tag, self->value.l);
-        break;
 
 #ifdef HAVE_LONG_LONG
     case 'q':
     case 'Q':
-        sprintf(buffer,
-#ifdef MS_WIN32
-            "<cparam '%c' (%I64d)>",
-#else
-            "<cparam '%c' (%qd)>",
-#endif
+        return PyUnicode_FromFormat("<cparam '%c' (%lld)>",
             self->tag, self->value.q);
-        break;
 #endif
     case 'd':
-        sprintf(buffer, "<cparam '%c' (%f)>",
-            self->tag, self->value.d);
-        break;
-    case 'f':
-        sprintf(buffer, "<cparam '%c' (%f)>",
-            self->tag, self->value.f);
-        break;
-
+    case 'f': {
+        PyObject *f = PyFloat_FromDouble((self->tag == 'f') ? self->value.f : self->value.d);
+        if (f == NULL) {
+            return NULL;
+        }
+        PyObject *result = PyUnicode_FromFormat("<cparam '%c' (%R)>", self->tag, f);
+        Py_DECREF(f);
+        return result;
+    }
     case 'c':
-        sprintf(buffer, "<cparam '%c' (%c)>",
+         if (is_literal_char((unsigned char)self->value.c)) {
+            return PyUnicode_FromFormat("<cparam '%c' ('%c')>",
             self->tag, self->value.c);
-        break;
+         }
+         else {
+            return PyUnicode_FromFormat("<cparam '%c' ('\\x%02x')>",
+                 self->tag, (unsigned char)self->value.c);
+         }
 
 /* Hm, are these 'z' and 'Z' codes useful at all?
    Shouldn't they be replaced by the functionality of c_string
@@ -505,16 +506,19 @@ PyCArg_repr(PyCArgObject *self)
     case 'z':
     case 'Z':
     case 'P':
-        sprintf(buffer, "<cparam '%c' (%p)>",
+        return PyUnicode_FromFormat("<cparam '%c' (%p)>",
             self->tag, self->value.p);
-        break;
 
     default:
-        sprintf(buffer, "<cparam '%c' at %p>",
-            self->tag, self);
-        break;
+        if (is_literal_char((unsigned char)self->tag)) {
+            return PyUnicode_FromFormat("<cparam '%c' at %p>",
+                (unsigned char)self->tag, (void *)self);
+        }
+        else {
+            return PyUnicode_FromFormat("<cparam 0x%02x at %p>",
+                (unsigned char)self->tag, (void *)self);
+        }
     }
-    return PyUnicode_FromString(buffer);
 }
 
 static PyMemberDef PyCArgType_members[] = {
