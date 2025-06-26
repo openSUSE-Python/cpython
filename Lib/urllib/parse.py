@@ -74,6 +74,7 @@ def clear_cache():
     _parse_cache.clear()
     _safe_quoters.clear()
 
+isascii = lambda s: len(s) == len(s.encode())
 
 # Helpers for bytes handling
 # For 3.2, we deliberately require applications that
@@ -317,18 +318,21 @@ def _splitnetloc(url, start=0):
     return url[start:delim], url[delim:]   # return (domain, rest)
 
 def _checknetloc(netloc):
-    if not netloc or not any(ord(c) > 127 for c in netloc):
+    if not netloc or isascii(netloc):
         return
     # looking for characters like \u2100 that expand to 'a/c'
     # IDNA uses NFKC equivalence, so normalize for this check
     import unicodedata
-    netloc2 = unicodedata.normalize('NFKC', netloc)
-    if netloc == netloc2:
+    n = netloc.replace('@', '')   # ignore characters already included
+    n = n.replace(':', '')        # but not the surrounding text
+    n = n.replace('#', '')
+    n = n.replace('?', '')
+    netloc2 = unicodedata.normalize('NFKC', n)
+    if n == netloc2:
         return
-    _, _, netloc = netloc.rpartition('@') # anything to the left of '@' is okay
     for c in '/?#@:':
         if c in netloc2:
-            raise ValueError("netloc '" + netloc2 + "' contains invalid " +
+            raise ValueError("netloc '" + netloc + "' contains invalid " +
                              "characters under NFKC normalization")
 
 def urlsplit(url, scheme='', allow_fragments=True):
