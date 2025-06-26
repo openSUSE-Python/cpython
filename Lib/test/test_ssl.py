@@ -206,9 +206,10 @@ class BasicSocketTests(unittest.TestCase):
                           (('commonName', 'localhost'),))
                         )
         # Note the next three asserts will fail if the keys are regenerated
-        self.assertEqual(p['notAfter'], asn1time('Oct  5 23:01:56 2020 GMT'))
-        self.assertEqual(p['notBefore'], asn1time('Oct  8 23:01:56 2010 GMT'))
-        self.assertEqual(p['serialNumber'], 'D7C7381919AFC24E')
+        self.assertEqual(p['notAfter'], asn1time('Oct 18 02:59:54 2030 GMT'))
+        self.assertEqual(p['notBefore'], asn1time('Oct 20 02:59:54 2020 GMT'))
+        self.assertEqual(p['serialNumber'],
+                         '1130B2CC2BE7A4B53F5239E6F141123C1D7107A8')
         self.assertEqual(p['subject'],
                          ((('countryName', 'XY'),),
                           (('localityName', 'Castle Anthrax'),),
