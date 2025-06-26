@@ -728,7 +728,7 @@ aarch64_prep_args (struct call_context *context, unsigned char *stack,
 	      state.ngrn = N_X_ARG_REG;
 
 	      memcpy (allocate_to_stack (&state, stack, ty->alignment,
-					 ty->size), ecif->avalue + i, ty->size);
+					 ty->size), ecif->avalue[i], ty->size);
 	    }
 	  break;
 
