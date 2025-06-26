@@ -34,7 +34,7 @@ import collections
 __all__ = ["urlparse", "urlunparse", "urljoin", "urldefrag",
            "urlsplit", "urlunsplit", "urlencode", "parse_qs",
            "parse_qsl", "quote", "quote_plus", "quote_from_bytes",
-           "unquote", "unquote_plus", "unquote_to_bytes"]
+           "unquote", "unquote_plus", "unquote_to_bytes", "isascii"]
 
 # A classification of schemes ('' means apply by default)
 uses_relative = ['ftp', 'http', 'gopher', 'nntp', 'imap',
@@ -67,6 +67,10 @@ scheme_chars = ('abcdefghijklmnopqrstuvwxyz'
 
 # Unsafe bytes to be removed per WHATWG spec
 _UNSAFE_URL_BYTES_TO_REMOVE = ['\t', '\r', '\n']
+
+# Python >= 3.7 shim
+def isascii(word):
+    return all([ord(c) < 128 for c in word])
 
 # XXX: Consider replacing with functools.lru_cache
 MAX_CACHE_SIZE = 20
@@ -361,7 +365,7 @@ def urlsplit(url, scheme='', allow_fragments=True):
         clear_cache()
     netloc = query = fragment = ''
     i = url.find(':')
-    if i > 0:
+    if i > 0 and isascii(url[0]) and url[0].isalpha():
         if url[:i] == 'http': # optimize the common case
             scheme = url[:i].lower()
             url = url[i+1:]
