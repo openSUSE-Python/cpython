@@ -266,6 +266,10 @@ _contains_disallowed_url_pchar_re = re.compile('[\x00-\x20\x7f]')
 #  _is_allowed_url_pchars_re = re.compile(r"^[/!$&'()*+,;=:@%a-zA-Z0-9._~-]+$")
 # We are more lenient for assumed real world compatibility purposes.
 
+# These characters are not allowed within HTTP method names
+# to prevent http header injection.
+_contains_disallowed_method_pchar_re = re.compile('[\x00-\x1f]')
+
 # We always set the Content-Length header for these methods because some
 # servers will otherwise respond with a 411
 _METHODS_EXPECTING_BODY = {'PATCH', 'POST', 'PUT'}
@@ -1026,6 +1030,8 @@ class HTTPConnection:
         else:
             raise CannotSendRequest(self.__state)
 
+        self._validate_method(method)
+
         # Save the method we use, we need it later in the response phase
         self._method = method
         if not url:
@@ -1123,6 +1129,15 @@ class HTTPConnection:
         if match:
             raise InvalidURL("URL can't contain control characters. {!r} ".format(host) +
                              "(found at least {!r})".format(match.group()))
+
+    def _validate_method(self, method):
+        """Validate a method name for putrequest."""
+        # prevent http header injection
+        match = _contains_disallowed_method_pchar_re.search(method)
+        if match:
+            raise ValueError(
+                "method can't contain control characters. %r (found at "
+                "least %r)" % (method, match.group()))
 
     def putheader(self, header, *values):
         """Send a request header line to the server.

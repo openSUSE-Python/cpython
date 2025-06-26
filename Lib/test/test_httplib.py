@@ -1223,12 +1223,33 @@ class TunnelTests(TestCase):
         self.assertIn(b'Host: destination.com', self.conn.sock.data)
 
 
+class HttpMethodTests(TestCase):
+    def test_invalid_method_names(self):
+        methods = (
+            'GET\r',
+            'POST\n',
+            'PUT\n\r',
+            'POST\nValue',
+            'POST\nHOST:abc',
+            'GET\nrHost:abc\n',
+            'POST\rRemainder:\r',
+            'GET\rHOST:\n',
+            '\nPUT'
+        )
+
+        for method in methods:
+            with self.assertRaisesRegex(
+                    ValueError, "method can't contain control characters"):
+                conn = client.HTTPConnection('example.com')
+                conn.sock = FakeSocket(None)
+                conn.request(method=method, url="/")
+
 
 @support.reap_threads
 def test_main(verbose=None):
     support.run_unittest(HeaderTests, OfflineTest, BasicTest, TimeoutTest,
                          HTTPSTest, RequestBodyTest, SourceAddressTest,
-                         HTTPResponseTest, TunnelTests)
+                         HTTPResponseTest, TunnelTests, HttpMethodTests)
 
 if __name__ == '__main__':
     test_main()
