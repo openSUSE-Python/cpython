@@ -750,6 +750,14 @@ are always available.  They are listed here in alphabetical order.
    sequence (such as a string, bytes, tuple, list, or range) or a collection
    (such as a dictionary, set, or frozen set).
 
+   .. versionchanged:: 3.6.15-13
+      :class:`int` string inputs and string representations can be limited to
+      help avoid denial of service attacks. A :exc:`ValueError` is raised when
+      the limit is exceeded while converting a string *x* to an :class:`int` or
+      when converting an :class:`int` into a string would exceed the limit.
+      See the :ref:`integer string conversion length limitation
+      <int_max_str_digits>` documentation.
+
 
 .. _func-list:
 .. class:: list([iterable])

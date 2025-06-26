@@ -132,6 +132,8 @@ int Py_NoUserSiteDirectory = 0; /* for -s and site.py */
 int Py_UnbufferedStdioFlag = 0; /* Unbuffered binary std{in,out,err} */
 int Py_HashRandomizationFlag = 0; /* for -R and PYTHONHASHSEED */
 int Py_IsolatedFlag = 0; /* for -I, isolate from user's env */
+/* Unusual name compared to the above for backporting from 3.12 reasons. */
+int _Py_global_config_int_max_str_digits = -1; /* -X int_max_str_digits or PYTHONINTMAXSTRDIGITS */
 
 PyThreadState *_Py_Finalizing = NULL;
 

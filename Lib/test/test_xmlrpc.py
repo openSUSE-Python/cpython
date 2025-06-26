@@ -202,6 +202,24 @@ class XMLRPCTestCase(unittest.TestCase):
             self.assertIs(type(newvalue), xmlrpclib.Binary)
             self.assertIsNone(m)
 
+    def check_loads(self, s, value, **kwargs):
+        dump = '<params><param><value>%s</value></param></params>' % s
+        result, m = xmlrpclib.loads(dump, **kwargs)
+        (newvalue,) = result
+        self.assertEqual(newvalue, value)
+        self.assertIs(type(newvalue), type(value))
+        self.assertIsNone(m)
+
+    def test_limit_int(self):
+        check = self.check_loads
+        maxdigits = 5000
+        with support.adjust_int_max_str_digits(maxdigits):
+            s = '1' * (maxdigits + 1)
+            with self.assertRaises(ValueError):
+                check('<int>{}</int>'.format(s), None)
+            with self.assertRaises(ValueError):
+                check('<biginteger>{}</biginteger>'.format(s), None)
+
     def test_get_host_info(self):
         # see bug #3613, this raised a TypeError
         transp = xmlrpc.client.Transport()

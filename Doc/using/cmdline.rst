@@ -394,6 +394,9 @@ Miscellaneous options
      stored in a traceback of a trace. Use ``-X tracemalloc=NFRAME`` to start
      tracing with a traceback limit of *NFRAME* frames. See the
      :func:`tracemalloc.start` for more information.
+   * ``-X int_max_str_digits`` configures the :ref:`integer string conversion
+     length limitation <int_max_str_digits>`.  See also
+     :envvar:`PYTHONINTMAXSTRDIGITS`.
 
    It also allows to pass arbitrary values and retrieve them through the
    :data:`sys._xoptions` dictionary.
@@ -439,6 +442,9 @@ conflict.
    When :envvar:`PYTHONHOME` is set to a single directory, its value replaces
    both :file:`{prefix}` and :file:`{exec_prefix}`.  To specify different values
    for these, set :envvar:`PYTHONHOME` to :file:`{prefix}:{exec_prefix}`.
+
+   .. versionadded:: 3.6.15-13
+      The ``-X int_max_str_digits`` option.
 
 
 .. envvar:: PYTHONPATH
@@ -539,6 +545,14 @@ conflict.
 
    .. versionadded:: 3.2.3
 
+
+.. envvar:: PYTHONINTMAXSTRDIGITS
+
+   If this variable is set to an integer, it is used to configure the
+   interpreter's global :ref:`integer string conversion length limitation
+   <int_max_str_digits>`.
+
+   .. versionadded:: 3.6.15-13
 
 .. envvar:: PYTHONIOENCODING
 
