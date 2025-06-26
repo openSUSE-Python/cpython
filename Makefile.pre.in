@@ -702,10 +702,17 @@ Modules/getbuildinfo.o: $(PARSER_OBJS) \
 		$(MODOBJS) \
 		$(srcdir)/Modules/getbuildinfo.c
 	$(CC) -c $(PY_CORE_CFLAGS) \
+	      -DDATE="\"`date -u -r Makefile.pre.in +"%b %d %Y"`\"" \
+	      -DTIME="\"`date -u -r Makefile.pre.in +"%T"`\"" \
 	      -DHGVERSION="\"`LC_ALL=C $(HGVERSION)`\"" \
 	      -DHGTAG="\"`LC_ALL=C $(HGTAG)`\"" \
 	      -DHGBRANCH="\"`LC_ALL=C $(HGBRANCH)`\"" \
 	      -o $@ $(srcdir)/Modules/getbuildinfo.c
+
+Python/getcompiler.o: $(srcdir)/Python/getcompiler.c Makefile
+	$(CC) -c $(PY_CORE_CFLAGS) \
+		-DCOMPILER='"[GCC]"' \
+		-o $@ $(srcdir)/Python/getcompiler.c
 
 Modules/getpath.o: $(srcdir)/Modules/getpath.c Makefile
 	$(CC) -c $(PY_CORE_CFLAGS) -DPYTHONPATH='"$(PYTHONPATH)"' \
