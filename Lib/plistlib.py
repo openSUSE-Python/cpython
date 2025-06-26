@@ -225,10 +225,10 @@ class Data:
     def __eq__(self, other):
         if isinstance(other, self.__class__):
             return self.data == other.data
-        elif isinstance(other, str):
+        elif isinstance(other, bytes):
             return self.data == other
         else:
-            return id(self) == id(other)
+            return NotImplemented
 
     def __repr__(self):
         return "%s(%s)" % (self.__class__.__name__, repr(self.data))
@@ -625,7 +625,8 @@ class _BinaryPlistParser:
             self._objects = [_undefined] * num_objects
             return self._read_object(top_object)
 
-        except (OSError, IndexError, struct.error):
+        except (OSError, IndexError, struct.error, OverflowError,
+                MemoryError, ValueError):
             raise InvalidFileException()
 
     def _get_size(self, tokenL):
@@ -641,8 +642,10 @@ class _BinaryPlistParser:
     def _read_ints(self, n, size):
         data = self._fp.read(size * n)
         if size in _BINARY_FORMAT:
-            return struct.unpack('>' + _BINARY_FORMAT[size] * n, data)
+            return struct.unpack('>{}{}'.format(n, _BINARY_FORMAT[size]), data)
         else:
+            if not size or len(data) != size * n:
+                raise InvalidFileException()
             return tuple(int.from_bytes(data[i: i + size], 'big')
                          for i in range(0, size * n, size))
 
@@ -697,19 +700,25 @@ class _BinaryPlistParser:
 
         elif tokenH == 0x40:  # data
             s = self._get_size(tokenL)
-            if self._use_builtin_types:
-                result = self._fp.read(s)
-            else:
-                result = Data(self._fp.read(s))
+            result = self._fp.read(s)
+            if len(result) != s:
+                raise InvalidFileException()
+            if not self._use_builtin_types:
+                result = Data(result)
 
         elif tokenH == 0x50:  # ascii string
             s = self._get_size(tokenL)
-            result =  self._fp.read(s).decode('ascii')
-            result = result
+            data = self._fp.read(s)
+            if len(data) != s:
+                raise InvalidFileException()
+            result = data.decode('ascii')
 
         elif tokenH == 0x60:  # unicode string
-            s = self._get_size(tokenL)
-            result = self._fp.read(s * 2).decode('utf-16be')
+            s = self._get_size(tokenL) * 2
+            data = self._fp.read(s)
+            if len(data) != s:
+                raise InvalidFileException()
+            result = data.decode('utf-16be')
 
         # tokenH == 0x80 is documented as 'UID' and appears to be used for
         # keyed-archiving, not in plists.
@@ -733,9 +742,11 @@ class _BinaryPlistParser:
             obj_refs = self._read_refs(s)
             result = self._dict_type()
             self._objects[ref] = result
-            for k, o in zip(key_refs, obj_refs):
-                result[self._read_object(k)] = self._read_object(o)
-
+            try:
+                for k, o in zip(key_refs, obj_refs):
+                    result[self._read_object(k)] = self._read_object(o)
+            except TypeError:
+                raise InvalidFileException()
         else:
             raise InvalidFileException()
 
