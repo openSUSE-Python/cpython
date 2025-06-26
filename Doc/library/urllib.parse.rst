@@ -136,7 +136,9 @@ or on combining URL components into a URL string.
       now raise :exc:`ValueError`.
 
 
-.. function:: parse_qs(qs, keep_blank_values=False, strict_parsing=False, encoding='utf-8', errors='replace')
+.. function:: parse_qs(qs, keep_blank_values=False,
+   strict_parsing=False, encoding='utf-8', errors='replace',
+   max_num_fields=None, separator='&')
 
    Parse a query string given as a string argument (data of type
    :mimetype:`application/x-www-form-urlencoded`).  Data are returned as a
@@ -157,16 +159,26 @@ or on combining URL components into a URL string.
    percent-encoded sequences into Unicode characters, as accepted by the
    :meth:`bytes.decode` method.
 
+   The optional argument *separator* is the symbol to use for separating the
+   query arguments. It defaults to ``&``.
+
    Use the :func:`urllib.parse.urlencode` function (with the ``doseq``
    parameter set to ``True``) to convert such dictionaries into query
    strings.
 
-
    .. versionchanged:: 3.2
       Add *encoding* and *errors* parameters.
 
+   .. versionchanged:: 3.6.13
+      Added *separator* parameter with the default value of ``&``. Python
+      versions earlier than Python 3.6.13 allowed using both ``;`` and ``&`` as
+      query parameter separator. This has been changed to allow only a single
+      separator key, with ``&`` as the default separator.
 
-.. function:: parse_qsl(qs, keep_blank_values=False, strict_parsing=False, encoding='utf-8', errors='replace')
+
+.. function:: parse_qsl(qs, keep_blank_values=False,
+   strict_parsing=False, encoding='utf-8', errors='replace',
+   max_num_fields=None, separator='&')
 
    Parse a query string given as a string argument (data of type
    :mimetype:`application/x-www-form-urlencoded`).  Data are returned as a list of
@@ -186,11 +198,20 @@ or on combining URL components into a URL string.
    percent-encoded sequences into Unicode characters, as accepted by the
    :meth:`bytes.decode` method.
 
+   The optional argument *separator* is the symbol to use for separating the
+   query arguments. It defaults to ``&``.
+
    Use the :func:`urllib.parse.urlencode` function to convert such lists of pairs into
    query strings.
 
    .. versionchanged:: 3.2
       Add *encoding* and *errors* parameters.
+
+   .. versionchanged:: 3.6.13
+      Added *separator* parameter with the default value of ``&``. Python
+      versions earlier than Python 3.6.13 allowed using both ``;`` and ``&`` as
+      query parameter separator. This has been changed to allow only a single
+      separator key, with ``&`` as the default separator.
 
 
 .. function:: urlunparse(parts)

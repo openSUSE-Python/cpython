@@ -553,7 +553,7 @@ def unquote(string, encoding='utf-8', errors='replace'):
     return ''.join(res)
 
 def parse_qs(qs, keep_blank_values=False, strict_parsing=False,
-             encoding='utf-8', errors='replace'):
+             encoding='utf-8', errors='replace', separator='&'):
     """Parse a query given as a string argument.
 
         Arguments:
@@ -573,10 +573,13 @@ def parse_qs(qs, keep_blank_values=False, strict_parsing=False,
 
         encoding and errors: specify how to decode percent-encoded sequences
             into Unicode characters, as accepted by the bytes.decode() method.
+
+        separator: str. The symbol to use for separating the query arguments.
+            Defaults to &.
     """
     parsed_result = {}
     pairs = parse_qsl(qs, keep_blank_values, strict_parsing,
-                      encoding=encoding, errors=errors)
+                      encoding=encoding, errors=errors, separator=separator)
     for name, value in pairs:
         if name in parsed_result:
             parsed_result[name].append(value)
@@ -585,7 +588,7 @@ def parse_qs(qs, keep_blank_values=False, strict_parsing=False,
     return parsed_result
 
 def parse_qsl(qs, keep_blank_values=False, strict_parsing=False,
-              encoding='utf-8', errors='replace'):
+              encoding='utf-8', errors='replace', separator='&'):
     """Parse a query given as a string argument.
 
     Arguments:
@@ -605,10 +608,16 @@ def parse_qsl(qs, keep_blank_values=False, strict_parsing=False,
     encoding and errors: specify how to decode percent-encoded sequences
         into Unicode characters, as accepted by the bytes.decode() method.
 
+    separator: str. The symbol to use for separating the query arguments.
+        Defaults to &.
+
     Returns a list, as G-d intended.
     """
     qs, _coerce_result = _coerce_args(qs)
-    pairs = [s2 for s1 in qs.split('&') for s2 in s1.split(';')]
+    if not separator or (not isinstance(separator, (str, bytes))):
+        raise ValueError("Separator must be of type string or bytes.")
+
+    pairs = [s1 for s1 in qs.split(separator)]
     r = []
     for name_value in pairs:
         if not name_value and not strict_parsing:
