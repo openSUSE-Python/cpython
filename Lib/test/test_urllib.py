@@ -355,6 +355,38 @@ class urlopen_HttpTests(unittest.TestCase, FakeHTTPMixin, FakeFTPMixin):
         finally:
             self.unfakehttp()
 
+    @unittest.skipUnless(ssl, "ssl module required")
+    def test_url_host_with_control_char_rejected(self):
+        for char_no in list(range(0, 0x21)) + [0x7f]:
+            char = chr(char_no)
+            schemeless_url = "//localhost{}/test/".format(char)
+            self.fakehttp(b"HTTP/1.1 200 OK\r\n\r\nHello.")
+            try:
+                escaped_char_repr = repr(char).replace('\\', r'\\')
+                InvalidURL = http.client.InvalidURL
+                with self.assertRaisesRegex(
+                    InvalidURL, "contain control.*{}".format(escaped_char_repr)):
+                    urlopen("http:{}".format(schemeless_url))
+                with self.assertRaisesRegex(InvalidURL, "contain control.*{}".format(escaped_char_repr)):
+                    urlopen("https:{}".format(schemeless_url))
+            finally:
+                self.unfakehttp()
+
+    @unittest.skipUnless(ssl, "ssl module required")
+    def test_url_host_with_newline_header_injection_rejected(self):
+        self.fakehttp(b"HTTP/1.1 200 OK\r\n\r\nHello.")
+        host = "localhost\r\nX-injected: header\r\n"
+        schemeless_url = "//" + host + ":8080/test/?test=a"
+        try:
+            InvalidURL = http.client.InvalidURL
+            with self.assertRaisesRegex(
+                InvalidURL, r"contain control.*\\r"):
+                urlopen("http:{}".format(schemeless_url))
+            with self.assertRaisesRegex(InvalidURL, r"contain control.*\\n"):
+                urlopen("https:{}".format(schemeless_url))
+        finally:
+            self.unfakehttp()
+
     def test_read_0_9(self):
         # "0.9" response accepted (but not "simple responses" without
         # a status line)

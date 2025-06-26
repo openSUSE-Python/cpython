@@ -256,6 +256,16 @@ _contains_disallowed_url_pchar_re = re.compile('[\x00-\x20\x7f]')
 #  _is_allowed_url_pchars_re = re.compile(r"^[/!$&'()*+,;=:@%a-zA-Z0-9._~-]+$")
 # We are more lenient for assumed real world compatibility purposes.
 
+# These characters are not allowed within HTTP URL paths.
+#  See https://tools.ietf.org/html/rfc3986#section-3.3 and the
+#  https://tools.ietf.org/html/rfc3986#appendix-A pchar definition.
+# Prevents CVE-2019-9740.  Includes control characters such as \r\n.
+# We don't restrict chars above \x7f as putrequest() limits us to ASCII.
+_contains_disallowed_url_pchar_re = re.compile('[\x00-\x20\x7f]')
+# Arguably only these _should_ allowed:
+#  _is_allowed_url_pchars_re = re.compile(r"^[/!$&'()*+,;=:@%a-zA-Z0-9._~-]+$")
+# We are more lenient for assumed real world compatibility purposes.
+
 # We always set the Content-Length header for these methods because some
 # servers will otherwise respond with a 411
 _METHODS_EXPECTING_BODY = {'PATCH', 'POST', 'PUT'}
@@ -796,6 +806,8 @@ class HTTPConnection:
 
         (self.host, self.port) = self._get_hostport(host, port)
 
+        self._validate_host(self.host)
+
         # This is stored as an instance variable to allow unit
         # tests to replace it with a suitable mockup
         self._create_connection = socket.create_connection
@@ -1103,6 +1115,14 @@ class HTTPConnection:
         else:
             # For HTTP/1.0, the server will assume "not chunked"
             pass
+
+    def _validate_host(self, host):
+        """Validate a host so it doesn't contain control characters."""
+        # Prevent CVE-2019-18348.
+        match = _contains_disallowed_url_pchar_re.search(host)
+        if match:
+            raise InvalidURL("URL can't contain control characters. {!r} ".format(host) +
+                             "(found at least {!r})".format(match.group()))
 
     def putheader(self, header, *values):
         """Send a request header line to the server.
