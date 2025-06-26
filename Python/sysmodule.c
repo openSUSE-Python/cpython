@@ -1702,6 +1702,10 @@ _PySys_Init(void)
                         PyUnicode_FromString(Py_GetCopyright()));
     SET_SYS_FROM_STRING("platform",
                         PyUnicode_FromString(Py_GetPlatform()));
+    SET_SYS_FROM_STRING("arch",
+                        PyUnicode_FromString(Py_GetArch()));
+    SET_SYS_FROM_STRING("lib",
+                        PyUnicode_FromString(Py_GetLib()));
     SET_SYS_FROM_STRING("executable",
                         PyUnicode_FromWideChar(
                                Py_GetProgramFullPath(), -1));

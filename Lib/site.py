@@ -247,28 +247,37 @@ def getuserbase():
     USER_BASE = get_config_var('userbase')
     return USER_BASE
 
-def getusersitepackages():
+def getusersitepackages(lib_kind = 'purelib'):
     """Returns the user-specific site-packages directory path.
 
     If the global variable ``USER_SITE`` is not initialized yet, this
     function will also set it.
     """
+
+    set_user_site = (lib_kind == 'purelib')
+
     global USER_SITE
     user_base = getuserbase() # this will also set USER_BASE
 
-    if USER_SITE is not None:
+    if USER_SITE is not None and set_user_site:
         return USER_SITE
 
     from sysconfig import get_path
 
+    user_site = None
+
     if sys.platform == 'darwin':
         from sysconfig import get_config_var
         if get_config_var('PYTHONFRAMEWORK'):
-            USER_SITE = get_path('purelib', 'osx_framework_user')
-            return USER_SITE
+            user_site = get_path('purelib', 'osx_framework_user')
 
-    USER_SITE = get_path('purelib', '%s_user' % os.name)
-    return USER_SITE
+    if user_site is None:
+        user_site = get_path('purelib', '%s_user' % os.name)
+
+    if set_user_site:
+        USER_SITE = user_site
+
+    return user_site
 
 def addusersitepackages(known_paths):
     """Add a per user site-package to sys.path
@@ -278,10 +287,12 @@ def addusersitepackages(known_paths):
     """
     # get the per user site-package path
     # this call will also make sure USER_BASE and USER_SITE are set
-    user_site = getusersitepackages()
+    for kind in ('purelib', 'platlib'):
+        user_site = getusersitepackages()
 
-    if ENABLE_USER_SITE and os.path.isdir(user_site):
-        addsitedir(user_site, known_paths)
+        if ENABLE_USER_SITE and os.path.isdir(user_site):
+            addsitedir(user_site, known_paths)
+
     return known_paths
 
 def getsitepackages(prefixes=None):
@@ -304,13 +315,19 @@ def getsitepackages(prefixes=None):
         seen.add(prefix)
 
         if os.sep == '/':
-            sitepackages.append(os.path.join(prefix, "lib",
+            sitepackages.append(os.path.join(prefix, sys.lib,
                                         "python" + sys.version[:3],
                                         "site-packages"))
-            sitepackages.append(os.path.join(prefix, "lib", "site-python"))
+            if sys.lib != "lib":
+                sitepackages.append(os.path.join(prefix, "lib",
+                                        "python" + sys.version[:3],
+                                        "site-packages"))
+            sitepackages.append(os.path.join(prefix, sys.lib, "site-python"))
+            if sys.lib != "lib":
+                sitepackages.append(os.path.join(prefix, "lib", "site-python"))
         else:
             sitepackages.append(prefix)
-            sitepackages.append(os.path.join(prefix, "lib", "site-packages"))
+            sitepackages.append(os.path.join(prefix, sys.lib, "site-packages"))
         if sys.platform == "darwin":
             # for framework builds *only* we add the standard Apple
             # locations.

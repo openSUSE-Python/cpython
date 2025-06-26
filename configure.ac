@@ -794,6 +794,41 @@ esac
 MULTIARCH=$($CC --print-multiarch 2>/dev/null)
 AC_SUBST(MULTIARCH)
 
+AC_SUBST(ARCH)
+AC_MSG_CHECKING(ARCH)
+ARCH=`uname -m`
+case $ARCH in
+i?86) ARCH=i386;;
+esac
+AC_MSG_RESULT($ARCH)
+
+AC_SUBST(LIB)
+AC_MSG_CHECKING(LIB)
+case $ac_sys_system in
+Linux*)
+  # Test if the compiler is 64bit
+  echo 'int i;' > conftest.$ac_ext
+  python_cv_cc_64bit_output=no
+  if AC_TRY_EVAL(ac_compile); then
+    case `/usr/bin/file conftest.$ac_objext` in
+    *"ELF 64"*)
+      python_cv_cc_64bit_output=yes
+      ;;
+    esac
+  fi
+  rm -rf conftest*
+  ;;
+esac
+
+case $ARCH:$python_cv_cc_64bit_output in
+aarch64:yes | ppc64:yes | ppc64le:yes | powerpc64:yes | s390x:yes | sparc64:yes | x86_64:yes)
+  LIB="lib64"
+  ;;
+*:*)
+  LIB="lib"
+  ;;
+esac
+AC_MSG_RESULT($LIB)
 
 AC_SUBST(LIBRARY)
 AC_MSG_CHECKING(LIBRARY)
@@ -4115,7 +4150,7 @@ AC_MSG_RESULT($LDVERSION)
 
 dnl define LIBPL after ABIFLAGS and LDVERSION is defined.
 AC_SUBST(PY_ENABLE_SHARED)
-LIBPL='$(prefix)'"/lib/python${VERSION}/config-${LDVERSION}"
+LIBPL='$(prefix)'"/${LIB}/python${VERSION}/config-${LDVERSION}"
 AC_SUBST(LIBPL)
 
 # Check whether right shifting a negative integer extends the sign bit

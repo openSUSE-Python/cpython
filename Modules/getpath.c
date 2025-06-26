@@ -117,9 +117,11 @@
 #define EXEC_PREFIX PREFIX
 #endif
 
+#define LIB_PYTHON LIB "/python" VERSION
+
 #ifndef PYTHONPATH
-#define PYTHONPATH PREFIX "/lib/python" VERSION ":" \
-              EXEC_PREFIX "/lib/python" VERSION "/lib-dynload"
+#define PYTHONPATH PREFIX "/" LIB_PYTHON ":" \
+              EXEC_PREFIX "/" LIB_PYTHON "/lib-dynload"
 #endif
 
 #ifndef LANDMARK
@@ -494,7 +496,7 @@ calculate_path(void)
     _pythonpath = _Py_char2wchar(PYTHONPATH, NULL);
     _prefix = _Py_char2wchar(PREFIX, NULL);
     _exec_prefix = _Py_char2wchar(EXEC_PREFIX, NULL);
-    lib_python = _Py_char2wchar("lib/python" VERSION, NULL);
+    lib_python = _Py_char2wchar(LIB_PYTHON, NULL);
 
     if (!_pythonpath || !_prefix || !_exec_prefix || !lib_python) {
         Py_FatalError(

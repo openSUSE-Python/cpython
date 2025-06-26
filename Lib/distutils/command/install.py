@@ -19,6 +19,8 @@ from site import USER_BASE
 from site import USER_SITE
 HAS_USER_SITE = True
 
+libname = sys.lib
+
 WINDOWS_SCHEME = {
     'purelib': '$base/Lib/site-packages',
     'platlib': '$base/Lib/site-packages',
@@ -30,7 +32,7 @@ WINDOWS_SCHEME = {
 INSTALL_SCHEMES = {
     'unix_prefix': {
         'purelib': '$base/lib/python$py_version_short/site-packages',
-        'platlib': '$platbase/lib/python$py_version_short/site-packages',
+        'platlib': '$platbase/'+libname+'/python$py_version_short/site-packages',
         'headers': '$base/include/python$py_version_short$abiflags/$dist_name',
         'scripts': '$base/bin',
         'data'   : '$base',
