@@ -2353,7 +2353,8 @@ class TimeoutTests(test_utils.TestCase):
 
             dt = self.loop.time() - start
             # tolerate a small delta for slow delta or unstable clocks
-            self.assertTrue(0.09 < dt < 0.12, dt)
+            # Increase the delta to deal with very slow machines in IBS (mostly s390x)
+            self.assertAlmostEqual(dt, 0.105, delta=0.03)
             self.assertFalse(foo_running)
 
         self.loop.run_until_complete(go())
