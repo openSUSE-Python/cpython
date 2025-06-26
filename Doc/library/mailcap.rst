@@ -55,6 +55,19 @@ standard.  However, mailcap files are supported on most Unix systems.
    will automatically check such conditions and skip the entry if the check fails.
 
 
+.. versionchanged:: 3.11
+
+   To prevent security issues with shell metacharacters (symbols that have
+   special effects in a shell command line), ``findmatch`` will refuse
+   to inject ASCII characters other than alphanumerics and ``@+=:,./-_``
+   into the returned command line.
+
+   If a disallowed character appears in *filename*, ``findmatch`` will always
+   return ``(None, None)`` as if no entry was found.
+   If such a character appears elsewhere (a value in *plist* or in *MIMEtype*),
+   ``findmatch`` will ignore all mailcap entries which use that value.
+   A :mod:`warning <warnings>` will be raised in either case.
+
 .. function:: getcaps()
 
    Returns a dictionary mapping MIME types to a list of mailcap file entries. This
