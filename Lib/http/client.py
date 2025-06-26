@@ -411,6 +411,7 @@ class HTTPResponse(io.RawIOBase):
             if status != CONTINUE:
                 break
             # skip the header from the 100 response
+            header_count = 0
             while True:
                 skip = self.fp.readline(_MAXLINE + 1)
                 if len(skip) > _MAXLINE:
@@ -420,6 +421,10 @@ class HTTPResponse(io.RawIOBase):
                     break
                 if self.debuglevel > 0:
                     print("header:", skip)
+                # bpo-44022: Fix http client infinite line reading (DoS) after a http 100
+                header_count += 1
+                if header_count > _MAXHEADERS:
+                    raise HTTPException("got more than %d headers" % _MAXHEADERS)
 
         self.code = self.status = status
         self.reason = reason.strip()
