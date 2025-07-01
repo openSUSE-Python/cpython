@@ -15,6 +15,7 @@ import importlib.util
 import logging.handlers
 import nntplib
 import os
+import pathlib
 import platform
 import re
 import shutil
@@ -382,6 +383,8 @@ if sys.platform.startswith("win"):
                     os.rmdir(fullname)
                 else:
                     os.unlink(fullname)
+        if isinstance(path, pathlib.Path):
+            path = str(path)
         _waitfor(_rmtree_inner, path, waitall=True)
         _waitfor(os.rmdir, path)
 else:
@@ -918,6 +921,8 @@ def temp_dir(path=None, quiet=False):
 
     """
     dir_created = False
+    if isinstance(path, pathlib.Path):
+        path = str(path)
     if path is None:
         path = tempfile.mkdtemp()
         dir_created = True
@@ -935,7 +940,28 @@ def temp_dir(path=None, quiet=False):
         yield path
     finally:
         if dir_created:
-            shutil.rmtree(path)
+            # Add a retry mechanism for rmtree to handle transient PermissionErrors
+            # that can occur on some systems, especially during test cleanup.
+            for i in range(5):
+                try:
+                    shutil.rmtree(path)
+                    break
+                except FileNotFoundError:
+                    break
+                except PermissionError as e:
+                    if i < 4:
+                        import time
+                        time.sleep(0.1)
+                    else:
+                        raise
+                except OSError as e:
+                    # Catch other OS errors that might occur during cleanup
+                    # and re-raise if it's not a transient issue.
+                    if i < 4 and e.errno in (16, 39): # EBUSY, ENOTEMPTY
+                        import time
+                        time.sleep(0.1)
+                    else:
+                        raise
 
 @contextlib.contextmanager
 def change_cwd(path, quiet=False):

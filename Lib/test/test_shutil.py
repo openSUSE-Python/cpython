@@ -1227,6 +1227,7 @@ class TestShutil(unittest.TestCase):
     @requires_zlib
     def test_unpack_archive(self):
         formats = ['tar', 'gztar', 'zip']
+        filters = ['fully_trusted', 'data', None]
         if BZ2_SUPPORTED:
             formats.append('bztar')
 
@@ -1234,18 +1235,19 @@ class TestShutil(unittest.TestCase):
         expected = rlistdir(root_dir)
         expected.remove('outer')
         for format in formats:
-            base_name = os.path.join(self.mkdtemp(), 'archive')
-            filename = make_archive(base_name, format, root_dir, base_dir)
+            for filter in filters:
+                base_name = os.path.join(self.mkdtemp(), 'archive')
+                filename = make_archive(base_name, format, root_dir, base_dir)
 
-            # let's try to unpack it now
-            tmpdir2 = self.mkdtemp()
-            unpack_archive(filename, tmpdir2)
-            self.assertEqual(rlistdir(tmpdir2), expected)
+                # let's try to unpack it now
+                tmpdir2 = self.mkdtemp()
+                unpack_archive(filename, tmpdir2, filter=filter)
+                self.assertEqual(rlistdir(tmpdir2), expected)
 
-            # and again, this time with the format specified
-            tmpdir3 = self.mkdtemp()
-            unpack_archive(filename, tmpdir3, format=format)
-            self.assertEqual(rlistdir(tmpdir3), expected)
+                # and again, this time with the format specified
+                tmpdir3 = self.mkdtemp()
+                unpack_archive(filename, tmpdir3, format=format)
+                self.assertEqual(rlistdir(tmpdir3), expected)
         self.assertRaises(shutil.ReadError, unpack_archive, TESTFN)
         self.assertRaises(ValueError, unpack_archive, TESTFN, format='xxx')
 

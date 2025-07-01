@@ -907,7 +907,7 @@ def _unpack_zipfile(filename, extract_dir):
     finally:
         zip.close()
 
-def _unpack_tarfile(filename, extract_dir):
+def _unpack_tarfile(filename, extract_dir, *, filter=None):
     """Unpack tar/tar.gz/tar.bz2 `filename` to `extract_dir`
     """
     try:
@@ -916,7 +916,7 @@ def _unpack_tarfile(filename, extract_dir):
         raise ReadError(
             "%s is not a compressed or uncompressed tar file" % filename)
     try:
-        tarobj.extractall(extract_dir)
+        tarobj.extractall(extract_dir, filter=filter)
     finally:
         tarobj.close()
 
@@ -937,7 +937,7 @@ def _find_unpack_format(filename):
                 return name
     return None
 
-def unpack_archive(filename, extract_dir=None, format=None):
+def unpack_archive(filename, extract_dir=None, format=None, *, filter=None):
     """Unpack an archive.
 
     `filename` is the name of the archive.
@@ -951,10 +951,17 @@ def unpack_archive(filename, extract_dir=None, format=None):
     extension.
 
     In case none is found, a ValueError is raised.
+
+    If `filter` is given, it is passed to the underlying
+    extraction function.
     """
     if extract_dir is None:
         extract_dir = os.getcwd()
 
+    if filter is None:
+        filter_kwargs = {}
+    else:
+        filter_kwargs = {'filter': filter}
     if format is not None:
         try:
             format_info = _UNPACK_FORMATS[format]
@@ -962,7 +969,12 @@ def unpack_archive(filename, extract_dir=None, format=None):
             raise ValueError("Unknown unpack format '{0}'".format(format))
 
         func = format_info[1]
-        func(filename, extract_dir, **dict(format_info[2]))
+        add_args = format_info[2]
+        kwargs = dict(add_args) if add_args else {}
+        kwargs.update(filter_kwargs)
+        if func == _unpack_zipfile and 'filter' in kwargs:
+            del kwargs['filter']
+        func(filename, extract_dir, **kwargs)
     else:
         # we need to look at the registered unpackers supported extensions
         format = _find_unpack_format(filename)
@@ -970,9 +982,12 @@ def unpack_archive(filename, extract_dir=None, format=None):
             raise ReadError("Unknown archive format '{0}'".format(filename))
 
         func = _UNPACK_FORMATS[format][1]
-        kwargs = dict(_UNPACK_FORMATS[format][2])
+        add_args = _UNPACK_FORMATS[format][2]
+        kwargs = dict(add_args) if add_args else {}
+        kwargs.update(filter_kwargs)
+        if func == _unpack_zipfile and 'filter' in kwargs:
+            del kwargs['filter']
         func(filename, extract_dir, **kwargs)
-
 
 if hasattr(os, 'statvfs'):
 

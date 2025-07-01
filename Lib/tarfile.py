@@ -42,12 +42,14 @@ from builtins import open as bltn_open
 import sys
 import os
 import io
+import pathlib
 import shutil
 import stat
 import time
 import struct
 import copy
 import re
+import warnings
 
 try:
     import grp, pwd
@@ -64,7 +66,13 @@ except NameError:
     pass
 
 # from tarfile import *
-__all__ = ["TarFile", "TarInfo", "is_tarfile", "TarError"]
+__all__ = ["TarFile", "TarInfo", "is_tarfile", "TarError", "ReadError",
+           "CompressionError", "StreamError", "ExtractError", "HeaderError",
+           "ENCODING", "USTAR_FORMAT", "GNU_FORMAT", "PAX_FORMAT",
+           "DEFAULT_FORMAT", "open","fully_trusted_filter", "data_filter",
+           "tar_filter", "FilterError", "AbsoluteLinkError",
+           "OutsideDestinationError", "SpecialFileError", "AbsolutePathError",
+           "LinkOutsideDestinationError"]
 
 #---------------------------------------------------------
 # tar constants
@@ -153,6 +161,8 @@ else:
 def stn(s, length, encoding, errors):
     """Convert a string to a null-terminated bytes object.
     """
+    if s is None:
+        raise ValueError("metadata cannot contain None")
     s = s.encode(encoding, errors)
     return s[:length] + (length - len(s)) * NUL
 
@@ -720,9 +730,138 @@ class ExFileObject(io.BufferedReader):
 # Header length is digits followed by a space.
 _header_length_prefix_re = re.compile(br"([0-9]{1,20}) ")
 
+
+#-----------------------------
+# extraction filters (PEP 706)
+#-----------------------------
+
+class FilterError(TarError):
+    pass
+
+class AbsolutePathError(FilterError):
+    def __init__(self, tarinfo):
+        self.tarinfo = tarinfo
+        super().__init__('member {!r} has an absolute path'.format(tarinfo.name))
+
+class OutsideDestinationError(FilterError):
+    def __init__(self, tarinfo, path):
+        self.tarinfo = tarinfo
+        self._path = path
+        super().__init__('{!r} would be extracted to {!r}, '.format(tarinfo.name, path)
+                         + 'which is outside the destination')
+
+class SpecialFileError(FilterError):
+    def __init__(self, tarinfo):
+        self.tarinfo = tarinfo
+        super().__init__('{!r} is a special file'.format(tarinfo.name))
+
+class AbsoluteLinkError(FilterError):
+    def __init__(self, tarinfo):
+        self.tarinfo = tarinfo
+        super().__init__('{!r} is a symlink to an absolute path'.format(tarinfo.name))
+
+class LinkOutsideDestinationError(FilterError):
+    def __init__(self, tarinfo, path):
+        self.tarinfo = tarinfo
+        self._path = path
+        super().__init__('{!r} would link to {!r}, '.format(tarinfo.name, path)
+                         + 'which is outside the destination')
+
+
+def _is_subpath(path, directory):
+    """Return True if path is a subpath of directory, False otherwise."""
+    path = os.path.realpath(path)
+    directory = os.path.realpath(directory)
+    return path.startswith(directory + os.sep) or path == directory
+
+
+def _get_filtered_attrs(member, dest_path, for_data=True):
+    new_attrs = {}
+    name = member.name
+    # Ensure dest_path is a string for os.path operations
+    dest_path_str = str(os.path.realpath(dest_path))
+    # Strip leading / (tar's directory separator) from filenames.
+    # Include os.sep (target OS directory separator) as well.
+    if name.startswith(('/', os.sep)):
+        name = new_attrs['name'] = member.path.lstrip('/' + os.sep)
+    if os.path.isabs(name):
+        # Path is absolute even after stripping.
+        # For example, 'C:/foo' on Windows.
+        raise AbsolutePathError(member)
+    # Ensure we stay in the destination
+    target_path = os.path.realpath(os.path.join(dest_path_str, name))
+    if not _is_subpath(target_path, dest_path_str):
+        raise OutsideDestinationError(member, target_path)
+    # Limit permissions (no high bits, and go-w)
+    mode = member.mode
+    if mode is not None:
+        # Strip high bits & group/other write bits
+        mode = mode & 0o755
+        if for_data:
+            # For data, handle permissions & file types
+            if member.isreg() or member.islnk():
+                if not mode & 0o100:
+                    # Clear executable bits if not executable by user
+                    mode &= ~0o111
+                # Ensure owner can read & write
+                mode |= 0o600
+            elif member.isdir() or member.issym():
+                # Ignore mode for directories & symlinks
+                mode = None
+            else:
+                # Reject special files
+                raise SpecialFileError(member)
+        if mode != member.mode:
+            new_attrs['mode'] = mode
+    if for_data:
+        # Ignore ownership for 'data'
+        if member.uid is not None:
+            new_attrs['uid'] = None
+        if member.gid is not None:
+            new_attrs['gid'] = None
+        if member.uname is not None:
+            new_attrs['uname'] = None
+        if member.gname is not None:
+            new_attrs['gname'] = None
+        # Check link destination for 'data'
+        if member.islnk() or member.issym():
+            if os.path.isabs(member.linkname):
+                raise AbsoluteLinkError(member)
+            target_path = os.path.realpath(os.path.join(dest_path_str, member.linkname))
+            if not _is_subpath(target_path, dest_path_str):
+                    raise LinkOutsideDestinationError(member, target_path)
+    return new_attrs
+
+def fully_trusted_filter(member, dest_path):
+    return member
+
+def tar_filter(member, dest_path):
+    new_attrs = _get_filtered_attrs(member, dest_path, False)
+    if new_attrs:
+        new_attrs['deep'] = False
+        return member.replace(**new_attrs)
+    return member
+
+def data_filter(member, dest_path):
+    new_attrs = _get_filtered_attrs(member, dest_path, True)
+    if new_attrs:
+        new_attrs['deep'] = False
+        return member.replace(**new_attrs)
+    return member
+
+_NAMED_FILTERS = {
+    "fully_trusted": fully_trusted_filter,
+    "tar": tar_filter,
+    "data": data_filter,
+}
+
 #------------------
 # Exported Classes
 #------------------
+
+# Sentinel for replace() defaults, meaning "don't change the attribute"
+_KEEP = object()
+
 class TarInfo(object):
     """Informational class which holds the details about an
        archive member given by a tar header block.
@@ -778,12 +917,44 @@ class TarInfo(object):
     def __repr__(self):
         return "<%s %r at %#x>" % (self.__class__.__name__,self.name,id(self))
 
+    def replace(self, *,
+                name=_KEEP, mtime=_KEEP, mode=_KEEP, linkname=_KEEP,
+                uid=_KEEP, gid=_KEEP, uname=_KEEP, gname=_KEEP,
+                deep=True, _KEEP=_KEEP):
+        """Return a deep copy of self with the given attributes replaced.
+        """
+        if deep:
+            result = copy.deepcopy(self)
+        else:
+            result = copy.copy(self)
+        if name is not _KEEP:
+            result.name = name
+        if mtime is not _KEEP:
+            result.mtime = mtime
+        if mode is not _KEEP:
+            result.mode = mode
+        if linkname is not _KEEP:
+            result.linkname = linkname
+        if uid is not _KEEP:
+            result.uid = uid
+        if gid is not _KEEP:
+            result.gid = gid
+        if uname is not _KEEP:
+            result.uname = uname
+        if gname is not _KEEP:
+            result.gname = gname
+        return result
+
     def get_info(self):
         """Return the TarInfo's attributes as a dictionary.
         """
+        if self.mode is None:
+            mode = None
+        else:
+            mode = self.mode & 0o7777
         info = {
             "name":     self.name,
-            "mode":     self.mode & 0o7777,
+            "mode":     mode,
             "uid":      self.uid,
             "gid":      self.gid,
             "size":     self.size,
@@ -806,6 +977,9 @@ class TarInfo(object):
         """Return a tar header as a string of 512 byte blocks.
         """
         info = self.get_info()
+        for name, value in info.items():
+            if value is None:
+                raise ValueError("%s may not be None" % name)
 
         if format == USTAR_FORMAT:
             return self.create_ustar_header(info, encoding, errors)
@@ -918,6 +1092,12 @@ class TarInfo(object):
         """Return a header block. info is a dictionary with file
            information, format must be one of the *_FORMAT constants.
         """
+        # None values in metadata should cause ValueError.
+        # itn()/stn() do this for all fields except type.
+        filetype = info.get("type", REGTYPE)
+        if filetype is None:
+            raise ValueError("TarInfo.type must not be None")
+
         parts = [
             stn(info.get("name", ""), 100, encoding, errors),
             itn(info.get("mode", 0) & 0o7777, 8, format),
@@ -926,7 +1106,7 @@ class TarInfo(object):
             itn(info.get("size", 0), 12, format),
             itn(info.get("mtime", 0), 12, format),
             b"        ", # checksum field
-            info.get("type", REGTYPE),
+            filetype,
             stn(info.get("linkname", ""), 100, encoding, errors),
             info.get("magic", POSIX_MAGIC),
             stn(info.get("uname", ""), 32, encoding, errors),
@@ -1435,6 +1615,8 @@ class TarFile(object):
 
     fileobject = ExFileObject   # The file-object for extractfile().
 
+    extraction_filter = None    # The default filter for extraction.
+
     def __init__(self, name=None, mode="r", fileobj=None, format=None,
             tarinfo=None, dereference=None, ignore_zeros=None, encoding=None,
             errors="surrogateescape", pax_headers=None, debug=None, errorlevel=None):
@@ -1495,20 +1677,20 @@ class TarFile(object):
         # Init datastructures.
         self.closed = False
         self.members = []       # list of members as TarInfo objects
-        self._loaded = False    # flag if all members have been read
-        self.offset = self.fileobj.tell()
-                                # current position in the archive file
-        self.inodes = {}        # dictionary caching the inodes of
-                                # archive members already added
 
         try:
+            self._loaded = False    # flag if all members have been read
+            self.offset = self.fileobj.tell() # current position in the archive file
+                                    # current position in the archive file
+            self.inodes = {}        # dictionary caching the inodes of
+                                    # archive members already added
+            self.firstmember = None
             if self.mode == "r":
-                self.firstmember = None
                 self.firstmember = self.next()
 
-            if self.mode == "a":
-                # Move to the end of the archive,
-                # before the first empty block.
+            # For 'a' (append) mode, we need to read to the end of the archive,
+            # but not necessarily extract the first member like 'r' mode.
+            elif self.mode == "a": # Use 'elif' to ensure only one branch runs
                 while True:
                     self.fileobj.seek(self.offset)
                     try:
@@ -1528,7 +1710,8 @@ class TarFile(object):
                     self.fileobj.write(buf)
                     self.offset += len(buf)
         except:
-            if not self._extfileobj:
+            # If an error occurs during init, ensure fileobj is closed if not external
+            if hasattr(self, 'fileobj') and not self._extfileobj:
                 self.fileobj.close()
             self.closed = True
             raise
@@ -1889,7 +2072,10 @@ class TarFile(object):
 
         for tarinfo in self:
             if verbose:
-                _safe_print(stat.filemode(tarinfo.mode))
+                if tarinfo.mode is None:
+                    _safe_print("??????????")
+                else:
+                    _safe_print(stat.filemode(tarinfo.mode))
                 _safe_print("%s/%s" % (tarinfo.uname or tarinfo.uid,
                                        tarinfo.gname or tarinfo.gid))
                 if tarinfo.ischr() or tarinfo.isblk():
@@ -1897,8 +2083,11 @@ class TarFile(object):
                             ("%d,%d" % (tarinfo.devmajor, tarinfo.devminor)))
                 else:
                     _safe_print("%10d" % tarinfo.size)
-                _safe_print("%d-%02d-%02d %02d:%02d:%02d" \
-                            % time.localtime(tarinfo.mtime)[:6])
+                if tarinfo.mtime is None:
+                    _safe_print("????-??-?? ??:??:??")
+                else:
+                    _safe_print("%d-%02d-%02d %02d:%02d:%02d"
+                                % time.localtime(tarinfo.mtime)[:6])
 
             _safe_print(tarinfo.name + ("/" if tarinfo.isdir() else ""))
 
@@ -1996,78 +2185,238 @@ class TarFile(object):
 
         self.members.append(tarinfo)
 
-    def extractall(self, path=".", members=None):
+    def _get_filter_function(self, filter):
+        if filter is None:
+            filter = self.extraction_filter
+            if filter is None:
+                warnings.warn(
+                    'Python 3.14 will, by default, filter extracted tar '
+                    + 'archives and reject files or modify their metadata. '
+                    + 'Use the filter argument to control this behavior.',
+                    DeprecationWarning)
+                return fully_trusted_filter
+            # string names for filters are handled by _NAMED_FILTERS,
+            # so isinstance(filter, str) is not expected here for callable
+            # filters. If it is a string, it will be caught by KeyError below.
+
+            return filter
+        if callable(filter):
+            return filter
+        try:
+            return _NAMED_FILTERS[filter]
+        except KeyError:
+            raise ValueError("filter {!r} not found".format(filter)) from None
+
+    def _get_filter_function(self, filter):
+        if filter is None:
+            filter = self.extraction_filter
+            if filter is None:
+                warnings.warn(
+                    'Python 3.14 will, by default, filter extracted tar '
+                    + 'archives and reject files or modify their metadata. '
+                    + 'Use the filter argument to control this behavior.',
+                    DeprecationWarning)
+                return fully_trusted_filter
+            if isinstance(filter, str):
+                raise TypeError(
+                    'String names are not supported for '
+                    + 'TarFile.extraction_filter. Use a function such as '
+                    + 'tarfile.data_filter directly.')
+            return filter
+        if callable(filter):
+            return filter
+        try:
+            return _NAMED_FILTERS[filter]
+        except KeyError:
+            raise ValueError("filter {!r} not found".format(filter)) from None
+
+    def extractall(self, path=".", members=None, numeric_owner=False, filter=None):
         """Extract all members from the archive to the current working
            directory and set owner, modification time and permissions on
            directories afterwards. `path' specifies a different directory
            to extract to. `members' is optional and must be a subset of the
            list returned by getmembers().
+
+           The `filter` function will be called on each member just
+           before extraction.
+           It can return a changed TarInfo or None to skip the member.
+           String names of common filters are accepted.
         """
         directories = []
+        # Ensure path is a string for os.path operations
+        if isinstance(path, pathlib.Path):
+            path_str = str(path.absolute())
+        else:
+            # Hail, Mary! Hopefully, it will convert something into string
+            path_str = str(path)
+        path = os.path.abspath(path_str)
 
+        filter_function = self._get_filter_function(filter)
         if members is None:
             members = self
 
-        for tarinfo in members:
+        for member in members:
+            tarinfo = self._get_extract_tarinfo(member, filter_function, path)
+            if tarinfo is None:
+                continue
             if tarinfo.isdir():
-                # Extract directories with a safe mode.
+                # For directories, delay setting attributes until later,
+                # since permissions can interfere with extraction and
+                # extracting contents can reset mtime.
                 directories.append(tarinfo)
-                tarinfo = copy.copy(tarinfo)
-                tarinfo.mode = 0o700
-            # Do not set_attrs directories, as we will do that further down
-            self.extract(tarinfo, path, set_attrs=not tarinfo.isdir())
+            self._extract_one(tarinfo, path, set_attrs=not tarinfo.isdir(),
+                              numeric_owner=numeric_owner)
 
         # Reverse sort directories.
-        directories.sort(key=lambda a: a.name)
-        directories.reverse()
+        directories.sort(key=lambda a: a.name, reverse=True)
 
         # Set correct owner, mtime and filemode on directories.
         for tarinfo in directories:
             dirpath = os.path.join(path, tarinfo.name)
             try:
-                self.chown(tarinfo, dirpath)
+                self.chown(tarinfo, dirpath, numeric_owner)
                 self.utime(tarinfo, dirpath)
                 self.chmod(tarinfo, dirpath)
             except ExtractError as e:
-                if self.errorlevel > 1:
-                    raise
-                else:
-                    self._dbg(1, "tarfile: %s" % e)
+                self._handle_nonfatal_error(e)
 
-    def extract(self, member, path="", set_attrs=True):
+    def extract(self, member, path="", set_attrs=True, numeric_owner=False, filter=None):
         """Extract a member from the archive to the current working directory,
            using its full name. Its file information is extracted as accurately
            as possible. `member' may be a filename or a TarInfo object. You can
            specify a different directory using `path'. File attributes (owner,
            mtime, mode) are set unless `set_attrs' is False.
-        """
-        self._check("r")
 
+           The `filter` function will be called before extraction.
+           It can return a changed TarInfo or None to skip the member.
+           String names of common filters are accepted.
+        """
+        path = os.path.abspath(str(path.absolute()) if isinstance(path, pathlib.Path) else str(path))
+
+        filter_function = self._get_filter_function(filter)
+        tarinfo = self._get_extract_tarinfo(member, filter_function, path)
+        if tarinfo is not None:
+            self._extract_one(tarinfo, path, set_attrs, numeric_owner)
+
+    def _get_extract_tarinfo(self, member, filter_function, path):
+        """Get filtered TarInfo (or None) from member, which might be a str"""
         if isinstance(member, str):
             tarinfo = self.getmember(member)
         else:
             tarinfo = member
 
+        # path is already converted to str by the calling extract/extractall
+        try:
+            tarinfo = filter_function(tarinfo, path)
+        except (OSError, FilterError) as e:
+            self._handle_fatal_error(e)
+        except ExtractError as e:
+            self._handle_nonfatal_error(e)
+        if tarinfo is None:
+            self._dbg(2, "tarfile: Excluded %r" % unfiltered.name)
+            return None
+
         # Prepare the link target for makelink().
         if tarinfo.islnk():
+            tarinfo = copy.copy(tarinfo)
             tarinfo._link_target = os.path.join(path, tarinfo.linkname)
+        return tarinfo
+
+    def _extract_one(self, tarinfo, path, set_attrs, numeric_owner):
+        """Extract from filtered tarinfo to disk"""
+        self._check("r")
+
+        # path is already converted to str by the calling extract/extractall
+
+        try:
+            self._extract_member(tarinfo, os.path.join(path, tarinfo.name),
+                                 set_attrs=set_attrs, numeric_owner=numeric_owner)
+        except OSError as e:
+            self._handle_fatal_error(e)
+        except ExtractError as e:
+            self._handle_nonfatal_error(e)
+
+    def _handle_nonfatal_error(self, e):
+        """Handle non-fatal error (ExtractError) according to errorlevel"""
+        if self.errorlevel > 1:
+            raise
+        else:
+            self._dbg(1, "tarfile: %s" % e)
+
+    def _handle_fatal_error(self, e):
+        """Handle "fatal" error according to self.errorlevel"""
+        if self.errorlevel > 0:
+            raise
+        elif isinstance(e, OSError):
+            if e.filename is None:
+                self._dbg(1, "tarfile: %s" % e.strerror)
+            else:
+                self._dbg(1, "tarfile: %s %r" % (e.strerror, e.filename))
+        else:
+            self._dbg(1, "tarfile: %s %s" % (type(e).__name__, e))
+
+    def _get_extract_tarinfo(self, member, filter_function, path):
+        """Get filtered TarInfo (or None) from member, which might be a str"""
+        if isinstance(member, str):
+            tarinfo = self.getmember(member)
+        else:
+            tarinfo = member
+
+        if isinstance(path, pathlib.Path):
+            path = path.absolute().as_posix()
+
+        unfiltered = tarinfo
+        try:
+            tarinfo = filter_function(tarinfo, path)
+        except (OSError, FilterError) as e:
+            self._handle_fatal_error(e)
+        except ExtractError as e:
+            self._handle_nonfatal_error(e)
+        if tarinfo is None:
+            self._dbg(2, "tarfile: Excluded %r" % unfiltered.name)
+            return None
+
+        # Prepare the link target for makelink().
+        if tarinfo.islnk():
+            tarinfo = copy.copy(tarinfo)
+            tarinfo._link_target = os.path.join(path, tarinfo.linkname)
+        return tarinfo
+
+    def _extract_one(self, tarinfo, path, set_attrs, numeric_owner):
+        """Extract from filtered tarinfo to disk"""
+        self._check("r")
+
+        # path is already converted to str by the calling extract/extractall
+
+        if isinstance(path, pathlib.Path):
+            path = path.absolute().as_posix()
 
         try:
             self._extract_member(tarinfo, os.path.join(path, tarinfo.name),
                                  set_attrs=set_attrs)
         except OSError as e:
-            if self.errorlevel > 0:
-                raise
-            else:
-                if e.filename is None:
-                    self._dbg(1, "tarfile: %s" % e.strerror)
-                else:
-                    self._dbg(1, "tarfile: %s %r" % (e.strerror, e.filename))
+            self._handle_fatal_error(e)
         except ExtractError as e:
-            if self.errorlevel > 1:
-                raise
+            self._handle_nonfatal_error(e)
+
+    def _handle_nonfatal_error(self, e):
+        """Handle non-fatal error (ExtractError) according to errorlevel"""
+        if self.errorlevel > 1:
+            raise
+        else:
+            self._dbg(1, "tarfile: %s" % e)
+
+    def _handle_fatal_error(self, e):
+        """Handle "fatal" error according to self.errorlevel"""
+        if self.errorlevel > 0:
+            raise
+        elif isinstance(e, OSError):
+            if e.filename is None:
+                self._dbg(1, "tarfile: %s" % e.strerror)
             else:
-                self._dbg(1, "tarfile: %s" % e)
+                self._dbg(1, "tarfile: %s %r" % (e.strerror, e.filename))
+        else:
+            self._dbg(1, "tarfile: %s %s" % (type(e).__name__, e))
 
     def extractfile(self, member):
         """Extract a member from the archive as a file object. `member' may be
@@ -2100,7 +2449,8 @@ class TarFile(object):
             # blkdev, etc.), return None instead of a file object.
             return None
 
-    def _extract_member(self, tarinfo, targetpath, set_attrs=True):
+    def _extract_member(self, tarinfo, targetpath, set_attrs=True,
+                        numeric_owner=False):
         """Extract the TarInfo object tarinfo to a physical
            file called targetpath.
         """
@@ -2152,9 +2502,14 @@ class TarFile(object):
         """Make a directory called targetpath.
         """
         try:
-            # Use a safe mode for the directory, the real mode is set
-            # later in _extract_member().
-            os.mkdir(targetpath, 0o700)
+            if tarinfo.mode is None:
+                # Use a default mode that allows read/write/execute for all,
+                # to ensure cleanup.
+                os.mkdir(targetpath, 0o777)
+            else:
+                # Use a safe mode for the directory, the real mode is set
+                # later in _extract_member().
+                os.mkdir(targetpath, 0o700)
         except FileExistsError:
             pass
 
@@ -2196,6 +2551,9 @@ class TarFile(object):
             raise ExtractError("special devices not supported by system")
 
         mode = tarinfo.mode
+        if mode is None:
+            # Use mknod's default
+            mode = 0o600
         if tarinfo.isblk():
             mode |= stat.S_IFBLK
         else:
@@ -2214,7 +2572,6 @@ class TarFile(object):
             if tarinfo.issym():
                 os.symlink(tarinfo.linkname, targetpath)
             else:
-                # See extract().
                 if os.path.exists(tarinfo._link_target):
                     os.link(tarinfo._link_target, targetpath)
                 else:
@@ -2227,19 +2584,30 @@ class TarFile(object):
             except KeyError:
                 raise ExtractError("unable to resolve link inside archive")
 
-    def chown(self, tarinfo, targetpath):
+    def chown(self, tarinfo, targetpath, numeric_owner=False):
         """Set owner of targetpath according to tarinfo.
         """
         if pwd and hasattr(os, "geteuid") and os.geteuid() == 0:
             # We have to be root to do so.
-            try:
-                g = grp.getgrnam(tarinfo.gname)[2]
-            except KeyError:
-                g = tarinfo.gid
-            try:
-                u = pwd.getpwnam(tarinfo.uname)[2]
-            except KeyError:
-                u = tarinfo.uid
+            u = tarinfo.uid
+            g = tarinfo.gid
+
+            if not numeric_owner:
+                try:
+                    if grp and tarinfo.gname:
+                        g = grp.getgrnam(tarinfo.gname)[2]
+                except KeyError:
+                    pass
+                try:
+                    if pwd and tarinfo.uname:
+                        u = pwd.getpwnam(tarinfo.uname)[2]
+                except KeyError:
+                    pass
+
+            if g is None:
+                g = -1
+            if u is None:
+                u = -1
             try:
                 if tarinfo.issym() and hasattr(os, "lchown"):
                     os.lchown(targetpath, u, g)
@@ -2251,6 +2619,8 @@ class TarFile(object):
     def chmod(self, tarinfo, targetpath):
         """Set file permissions of targetpath according to tarinfo.
         """
+        if tarinfo.mode is None:
+            return
         if hasattr(os, 'chmod'):
             try:
                 os.chmod(targetpath, tarinfo.mode)
@@ -2260,10 +2630,13 @@ class TarFile(object):
     def utime(self, tarinfo, targetpath):
         """Set modification time of targetpath according to tarinfo.
         """
+        mtime = tarinfo.mtime
+        if mtime is None:
+            return
         if not hasattr(os, 'utime'):
             return
         try:
-            os.utime(targetpath, (tarinfo.mtime, tarinfo.mtime))
+            os.utime(targetpath, (mtime, mtime))
         except OSError as e:
             raise ExtractError("could not change modification time")
 
@@ -2330,13 +2703,26 @@ class TarFile(object):
         members = self.getmembers()
 
         # Limit the member search list up to tarinfo.
+        skipping = False
         if tarinfo is not None:
-            members = members[:members.index(tarinfo)]
+            try:
+                index = members.index(tarinfo)
+            except ValueError:
+                # The given starting point might be a (modified) copy.
+                # We'll later skip members until we find an equivalent.
+                skipping = True
+            else:
+                # Happy fast path
+                members = members[:index]
 
         if normalize:
             name = os.path.normpath(name)
 
         for member in reversed(members):
+            if skipping:
+                if tarinfo.offset == member.offset:
+                    skipping = False
+                continue
             if normalize:
                 member_name = os.path.normpath(member.name)
             else:
@@ -2344,6 +2730,10 @@ class TarFile(object):
 
             if name == member_name:
                 return member
+
+        if skipping:
+            # Starting point was not found
+            raise ValueError(tarinfo)
 
     def _load(self):
         """Read through the entire archive file and look for readable
@@ -2453,6 +2843,7 @@ class TarIter:
 #--------------------
 # exported functions
 #--------------------
+
 def is_tarfile(name):
     """Return True if name points to a tar archive that we
        are able to handle, else return False.
@@ -2474,6 +2865,10 @@ def main():
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument('-v', '--verbose', action='store_true', default=False,
                         help='Verbose output')
+    parser.add_argument('--filter', metavar='<filtername>',
+                        choices=_NAMED_FILTERS,
+                        help='Filter for extraction')
+
     group = parser.add_mutually_exclusive_group()
     group.add_argument('-l', '--list', metavar='<tarfile>',
                        help='Show listing of a tarfile')
@@ -2485,7 +2880,11 @@ def main():
                        help='Create tarfile from sources')
     group.add_argument('-t', '--test', metavar='<tarfile>',
                        help='Test if a tarfile is valid')
+
     args = parser.parse_args()
+
+    if args.filter and args.extract is None:
+        parser.exit(1, '--filter is only valid for extraction\n')
 
     if args.test:
         src = args.test
@@ -2517,7 +2916,7 @@ def main():
 
         if is_tarfile(src):
             with TarFile.open(src, 'r:*') as tf:
-                tf.extractall(path=curdir)
+                tf.extractall(path=curdir, filter=args.filter)
             if args.verbose:
                 if curdir == '.':
                     msg = '{!r} file is extracted.'.format(src)
