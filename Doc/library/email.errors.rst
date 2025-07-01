@@ -61,6 +61,13 @@ The following exception classes are defined in the :mod:`email.errors` module:
    :class:`~email.mime.nonmultipart.MIMENonMultipart` (e.g.
    :class:`~email.mime.image.MIMEImage`).
 
+
+.. exception:: HeaderWriteError()
+
+   Raised when an error occurs when the :mod:`~email.generator` outputs
+   headers.
+
+
 Here's the list of the defects that the :class:`~email.parser.FeedParser`
 can find while parsing messages.  Note that the defects are added to the message
 where the problem was found, so for example, if a message nested inside a

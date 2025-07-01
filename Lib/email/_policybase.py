@@ -154,6 +154,13 @@ class Policy(_PolicyBase, metaclass=abc.ABCMeta):
                            them. This is used when the message is being
                            serialized by a generator. Default: True.
 
+    verify_generated_headers
+                        -- if true, the generator verifies that each header
+                           they are properly folded, so that a parser won't
+                           treat it as multiple headers, start-of-body, or
+                           part of another header.
+                           This is a check against custom Header & fold()
+                           implementations.
     """
 
     raise_on_defect = False
@@ -161,6 +168,7 @@ class Policy(_PolicyBase, metaclass=abc.ABCMeta):
     cte_type = '8bit'
     max_line_length = 78
     mangle_from_ = False
+    verify_generated_headers = True
 
     def handle_defect(self, obj, defect):
         """Based on policy, either raise defect or call register_defect.

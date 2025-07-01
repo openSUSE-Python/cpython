@@ -23,6 +23,7 @@ class PolicyAPITests(unittest.TestCase):
         'cte_type':                 '8bit',
         'raise_on_defect':          False,
         'mangle_from_':             True,
+        'verify_generated_headers': True,
         }
     # These default values are the ones set on email.policy.default.
     # If any of these defaults change, the docs must be updated.
@@ -231,6 +232,31 @@ class PolicyAPITests(unittest.TestCase):
         self.assertEqual(newpolicy.header_factory,
                          email.policy.EmailPolicy.header_factory)
         self.assertEqual(newpolicy.__dict__, {'raise_on_defect': True})
+
+    def test_verify_generated_headers(self):
+        """Turning protection off allows header injection"""
+        policy = email.policy.default.clone(verify_generated_headers=False)
+        for text in (
+            'Header: Value\r\nBad: Injection\r\n',
+            'Header: NoNewLine'
+        ):
+            with self.subTest(text=text):
+                message = email.message_from_string(
+                    "Header: Value\r\n\r\nBody",
+                    policy=policy,
+                )
+                class LiteralHeader(str):
+                    name = 'Header'
+                    def fold(self, **kwargs):
+                        return self
+
+                del message['Header']
+                message['Header'] = LiteralHeader(text)
+
+                self.assertEqual(
+                    message.as_string(),
+                    "{}\nBody".format(text),
+                )
 
     # XXX: Need subclassing tests.
     # For adding subclassed objects, make sure the usual rules apply (subclass
