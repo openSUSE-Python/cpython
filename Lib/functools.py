@@ -11,7 +11,7 @@
 
 __all__ = ['update_wrapper', 'wraps', 'WRAPPER_ASSIGNMENTS', 'WRAPPER_UPDATES',
            'total_ordering', 'cmp_to_key', 'lru_cache', 'reduce', 'partial',
-           'partialmethod', 'singledispatch']
+           'partialmethod', 'singledispatch', 'cached_property']
 
 try:
     from _functools import reduce
@@ -733,3 +733,103 @@ def singledispatch(func):
     wrapper._clear_cache = dispatch_cache.clear
     update_wrapper(wrapper, func)
     return wrapper
+
+################################################################################
+### for ipaddress
+### copied from https://github.com/penguinolog/backports.cached_property
+################################################################################
+"""Backport of python 3.8 functools.cached_property.
+
+cached_property() - computed once per instance, cached as attribute
+"""
+import functools
+from threading import RLock
+
+_NOT_FOUND = object()
+
+
+class cached_property:
+    """
+    Cached property implementation compatible with Python 3.4 and __slots__.
+
+    A property that caches its result after the first access.
+    The cached value is stored in an attribute named `_<original_func_name>_cached_value`.
+    This avoids conflicts when the property name itself is listed in __slots__.
+    """
+    def __init__(self, func):
+        if not callable(func):
+            raise TypeError("cached_property expected a callable, got %r" % type(func))
+        self.func = func
+        self.__doc__ = func.__doc__
+        # The name where the cached value will actually be stored in the instance's slots/dict
+        # We use a mangled name to avoid collision with the property name itself in __slots__
+        self.cache_attr_name = '_{}_cached_value'.format(func.__name__)
+
+        self.lock = RLock()
+
+    def __get__(self, instance, owner=None):
+        if instance is None:
+            return self
+
+        # Check if the instance has a __dict__ for caching
+        has_dict = hasattr(instance, '__dict__')
+        cache = None
+        if has_dict:
+            # If instance has a dict, it's used for caching
+            cache = instance.__dict__
+            val = cache.get(self.cache_attr_name, _NOT_FOUND)
+        else:
+            # For __slots__ classes, try to get the value directly from the instance's attributes
+            try:
+                val = object.__getattribute__(instance, self.cache_attr_name)
+            except AttributeError:
+                val = _NOT_FOUND
+
+        if val is _NOT_FOUND:
+            with self.lock:
+                # check if another thread filled cache while we awaited lock
+                if has_dict:
+                    val = cache.get(self.cache_attr_name, _NOT_FOUND)
+                else:
+                    try:
+                        val = object.__getattribute__(instance, self.cache_attr_name)
+                    except AttributeError:
+                        pass # Still not found, proceed to compute
+
+                if val is _NOT_FOUND:
+                    val = self.func(instance)
+                    try:
+                        if has_dict:
+                            cache[self.cache_attr_name] = val
+                        else:
+                            # For slotted classes, set the attribute directly using the mangled name
+                            object.__setattr__(instance, self.cache_attr_name, val)
+                    except AttributeError as e:
+                        msg = ("Cannot cache {!r} on {!r} instance. ".format(self.func.__name__, type(instance).__name__) +
+                               "Ensure '{}' is a defined slot or the class has a __dict__.".format(self.cache_attr_name))
+                        raise TypeError(msg) from e
+        return val
+
+
+    def __set__(self, instance, value):
+        """
+        Sets the value of the cached property on the instance.
+        This will override any previously cached value and future accesses
+        will return this set value until deleted.
+        """
+        if hasattr(instance, '__dict__'):
+            instance.__dict__[self.cache_attr_name] = value
+        else:
+            # For slotted classes, set the attribute directly using the mangled name
+            object.__setattr__(instance, self.cache_attr_name, value)
+
+    def __delete__(self, instance):
+        """
+        Deletes the cached value from the instance.
+        The next access will recompute the property.
+        """
+        if hasattr(instance, '__dict__'):
+            del instance.__dict__[self.cache_attr_name]
+        else:
+            # For slotted classes, delete the attribute directly using the mangled name
+            object.__delattr__(instance, self.cache_attr_name)
