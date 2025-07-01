@@ -32,10 +32,10 @@ end
 # unset irrelavent variables
 deactivate nondestructive
 
-set -gx VIRTUAL_ENV "__VENV_DIR__"
+set -gx VIRTUAL_ENV __VENV_DIR__
 
 set -gx _OLD_VIRTUAL_PATH $PATH
-set -gx PATH "$VIRTUAL_ENV/__VENV_BIN_NAME__" $PATH
+set -gx PATH "$VIRTUAL_ENV/"__VENV_BIN_NAME__ $PATH
 
 # unset PYTHONHOME if set
 if set -q PYTHONHOME
@@ -56,7 +56,7 @@ if test -z "$VIRTUAL_ENV_DISABLE_PROMPT"
     function fish_prompt
         # Prompt override?
         if test -n "__VENV_PROMPT__"
-            printf "%s%s%s" "__VENV_PROMPT__" (set_color normal) (_old_fish_prompt)
+            printf "%s%s%s" __VENV_PROMPT__ (set_color normal) (_old_fish_prompt)
             return
         end
         # ...Otherwise, prepend env

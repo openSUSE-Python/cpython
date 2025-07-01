@@ -8,6 +8,8 @@ Licensed to the PSF under a contributor agreement.
 import ensurepip
 import os
 import os.path
+import shlex
+import shutil
 import struct
 import subprocess
 import sys
@@ -70,6 +72,10 @@ class BaseTest(unittest.TestCase):
         with open(self.get_env_file(*args), 'r') as f:
             result = f.read()
         return result
+
+    def assertEndsWith(self, string, tail):
+        if not string.endswith(tail):
+            self.fail("String {!r} does not end with {!r}".format(string, tail))
 
 class BasicTest(BaseTest):
     """Test venv module functionality."""
@@ -276,6 +282,82 @@ class BasicTest(BaseTest):
                              stderr=subprocess.PIPE)
         out, err = p.communicate()
         self.assertEqual(out.strip(), envpy.encode())
+
+    # gh-124651: test quoted strings
+    @unittest.skipIf(os.name == 'nt', 'contains invalid characters on Windows')
+    def test_special_chars_bash(self):
+        """
+        Test that the template strings are quoted properly (bash)
+        """
+        rmtree(self.env_dir)
+        bash = shutil.which('bash')
+        if bash is None:
+            self.skipTest('bash required for this test')
+        env_name = '"\';&&$e|\'"'
+        env_dir = os.path.join(os.path.realpath(self.env_dir), env_name)
+        builder = venv.EnvBuilder(clear=True)
+        builder.create(env_dir)
+        activate = os.path.join(env_dir, self.bindir, 'activate')
+        test_script = os.path.join(self.env_dir, 'test_special_chars.sh')
+        with open(test_script, "w") as f:
+            f.write('source {}\n'.format(shlex.quote(activate)) +
+                    'python -c \'import sys; print(sys.executable)\'\n' +
+                    'python -c \'import os; print(os.environ["VIRTUAL_ENV"])\'\n' +
+                    'deactivate\n')
+        out = subprocess.check_output([bash, test_script])
+        lines = out.splitlines()
+        self.assertTrue(env_name.encode() in lines[0])
+        self.assertEndsWith(lines[1], env_name.encode())
+
+    # gh-124651: test quoted strings
+    @unittest.skipIf(os.name == 'nt', 'contains invalid characters on Windows')
+    def test_special_chars_csh(self):
+        """
+        Test that the template strings are quoted properly (csh)
+        """
+        rmtree(self.env_dir)
+        csh = shutil.which('tcsh') or shutil.which('csh')
+        if csh is None:
+            self.skipTest('csh required for this test')
+        env_name = '"\';&&$e|\'"'
+        env_dir = os.path.join(os.path.realpath(self.env_dir), env_name)
+        builder = venv.EnvBuilder(clear=True)
+        builder.create(env_dir)
+        activate = os.path.join(env_dir, self.bindir, 'activate.csh')
+        test_script = os.path.join(self.env_dir, 'test_special_chars.csh')
+        with open(test_script, "w") as f:
+            f.write('source {}\n'.format(shlex.quote(activate)) +
+                    'python -c \'import sys; print(sys.executable)\'\n' +
+                    'python -c \'import os; print(os.environ["VIRTUAL_ENV"])\'\n' +
+                    'deactivate\n')
+        out = subprocess.check_output([csh, test_script])
+        lines = out.splitlines()
+        self.assertTrue(env_name.encode() in lines[0])
+        self.assertEndsWith(lines[1], env_name.encode())
+
+    # gh-124651: test quoted strings on Windows
+    @unittest.skipUnless(os.name == 'nt', 'only relevant on Windows')
+    def test_special_chars_windows(self):
+        """
+        Test that the template strings are quoted properly on Windows
+        """
+        rmtree(self.env_dir)
+        env_name = "'&&^$e"
+        env_dir = os.path.join(os.path.realpath(self.env_dir), env_name)
+        builder = venv.EnvBuilder(clear=True)
+        builder.create(env_dir)
+        activate = os.path.join(env_dir, self.bindir, 'activate.bat')
+        test_batch = os.path.join(self.env_dir, 'test_special_chars.bat')
+        with open(test_batch, "w") as f:
+            f.write('@echo off\n'
+                    '"{}" & '.format(activate) +
+                    '{} -c "import sys; print(sys.executable)" & '.format(self.exe) +
+                    '{} -c "import os; print(os.environ[\'VIRTUAL_ENV\'])" & '.format(self.exe) +
+                    'deactivate')
+        out = subprocess.check_output([test_batch])
+        lines = out.splitlines()
+        self.assertTrue(env_name.encode() in lines[0])
+        self.assertEndsWith(lines[1], env_name.encode())
 
 
 @skipInVenv
