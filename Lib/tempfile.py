@@ -21,7 +21,7 @@ __all__ = [
     "mkstemp", "mkdtemp",                  # low level safe interfaces
     "mktemp",                              # deprecated unsafe interface
     "TMP_MAX", "gettempprefix",            # constants
-    "tempdir", "gettempdir"
+    "tempdir", "gettempdir", "gettempdirb"
    ]
 
 
@@ -81,6 +81,45 @@ def _exists(fn):
         return False
     else:
         return True
+
+
+def _infer_return_type(*args):
+    """Look at the type of all args and divine their implied return type."""
+    return_type = None
+    for arg in args:
+        if arg is None:
+            continue
+        if isinstance(arg, bytes):
+            if return_type is str:
+                raise TypeError("Can't mix bytes and non-bytes in "
+                                "path components.")
+            return_type = bytes
+        else:
+            if return_type is bytes:
+                raise TypeError("Can't mix bytes and non-bytes in "
+                                "path components.")
+            return_type = str
+    if return_type is None:
+        return str  # tempfile APIs return a str by default.
+    return return_type
+
+
+def _sanitize_params(prefix, suffix, dir):
+    """Common parameter processing for most APIs in this module."""
+    output_type = _infer_return_type(prefix, suffix, dir)
+    if suffix is None:
+        suffix = output_type()
+    if prefix is None:
+        if output_type is str:
+            prefix = template
+        else:
+            prefix = _os.fsencode(template)
+    if dir is None:
+        if output_type is str:
+            dir = gettempdir()
+        else:
+            dir = gettempdirb()
+    return prefix, suffix, dir, output_type
 
 class _RandomNameSequence:
     """An instance of _RandomNameSequence generates an endless
@@ -220,6 +259,22 @@ def _mkstemp_inner(dir, pre, suf, flags):
     raise FileExistsError(_errno.EEXIST,
                           "No usable temporary file name found")
 
+def _dont_follow_symlinks(func, path, *args):
+    # Pass follow_symlinks=False, unless not supported on this platform.
+    if func in _os.supports_follow_symlinks:
+        func(path, *args, follow_symlinks=False)
+    elif _os.name == 'nt' or not _os.path.islink(path):
+        func(path, *args)
+
+def _resetperms(path):
+    try:
+        chflags = _os.chflags
+    except AttributeError:
+        pass
+    else:
+        _dont_follow_symlinks(chflags, path, 0)
+    _dont_follow_symlinks(_os.chmod, path, 0o700)
+
 
 # User visible interfaces.
 
@@ -240,6 +295,12 @@ def gettempdir():
         finally:
             _once_lock.release()
     return tempdir
+
+
+def gettempdirb():
+    """A bytes version of tempfile.gettempdir()."""
+    return _os.fsencode(gettempdir())
+
 
 def mkstemp(suffix="", prefix=template, dir=None, text=False):
     """User-callable function to create and return a unique temporary
@@ -277,7 +338,6 @@ def mkstemp(suffix="", prefix=template, dir=None, text=False):
 
     return _mkstemp_inner(dir, prefix, suffix, flags)
 
-
 def mkdtemp(suffix="", prefix=template, dir=None):
     """User-callable function to create and return a unique temporary
     directory.  The return value is the pathname of the directory.
@@ -291,17 +351,17 @@ def mkdtemp(suffix="", prefix=template, dir=None):
     Caller is responsible for deleting the directory when done with it.
     """
 
-    if dir is None:
-        dir = gettempdir()
+    prefix, suffix, dir, output_type = _sanitize_params(prefix, suffix, dir)
 
     names = _get_candidate_names()
+    if output_type is bytes:
+        names = map(_os.fsencode, names)
 
     for seq in range(TMP_MAX):
         name = next(names)
         file = _os.path.join(dir, prefix + name + suffix)
         try:
             _os.mkdir(file, 0o700)
-            return file
         except FileExistsError:
             continue    # try again
         except PermissionError:
@@ -312,9 +372,11 @@ def mkdtemp(suffix="", prefix=template, dir=None):
                 continue
             else:
                 raise
+        return file
 
     raise FileExistsError(_errno.EEXIST,
                           "No usable temporary directory name found")
+
 
 def mktemp(suffix="", prefix=template, dir=None):
     """User-callable function to return a unique temporary file name.  The
@@ -675,7 +737,7 @@ class SpooledTemporaryFile:
         return rv
 
 
-class TemporaryDirectory(object):
+class TemporaryDirectory:
     """Create and return a temporary directory.  This has the same
     behavior as mkdtemp but can be used as a context manager.  For
     example:
@@ -684,20 +746,75 @@ class TemporaryDirectory(object):
             ...
 
     Upon exiting the context, the directory and everything contained
-    in it are removed.
+    in it are removed (unless delete=False is passed or an exception
+    is raised during cleanup and ignore_cleanup_errors is not True).
+
+    Optional Arguments:
+        suffix - A str suffix for the directory name.  (see mkdtemp)
+        prefix - A str prefix for the directory name.  (see mkdtemp)
+        dir - A directory to create this temp dir in.  (see mkdtemp)
+        ignore_cleanup_errors - False; ignore exceptions during cleanup?
+        delete - True; whether the directory is automatically deleted.
     """
 
-    def __init__(self, suffix="", prefix=template, dir=None):
+    def __init__(self, suffix=None, prefix=None, dir=None,
+                 ignore_cleanup_errors=False, *, delete=True):
         self.name = mkdtemp(suffix, prefix, dir)
+        self._ignore_cleanup_errors = ignore_cleanup_errors
+        self._delete = delete
         self._finalizer = _weakref.finalize(
             self, self._cleanup, self.name,
-            warn_message="Implicitly cleaning up {!r}".format(self))
+            warn_message="Implicitly cleaning up {!r}".format(self),
+            ignore_errors=self._ignore_cleanup_errors, delete=self._delete)
 
     @classmethod
-    def _cleanup(cls, name, warn_message):
-        _shutil.rmtree(name)
-        _warnings.warn(warn_message, ResourceWarning)
+    def _rmtree(cls, name, ignore_errors=False, repeated=False):
+        def onexc(func, path, exc_info):
+            exc = exc_info[1]
+            if isinstance(exc, PermissionError):
+                if repeated and path == name:
+                    if ignore_errors:
+                        return
+                    raise
 
+                try:
+                    if path != name:
+                        _resetperms(_os.path.dirname(path))
+                    _resetperms(path)
+
+                    try:
+                        _os.unlink(path)
+                    except IsADirectoryError:
+                        cls._rmtree(path)
+                    except PermissionError:
+                        # The PermissionError handler was originally added for
+                        # FreeBSD in directories, but it seems that it is raised
+                        # on Windows too.
+                        # bpo-43153: Calling _rmtree again may
+                        # raise NotADirectoryError and mask the PermissionError.
+                        # So we must re-raise the current PermissionError if
+                        # path is not a directory.
+                        if not _os.path.isdir(path) or _os.path.isjunction(path):
+                            if ignore_errors:
+                                return
+                            raise
+                        cls._rmtree(path, ignore_errors=ignore_errors,
+                                    repeated=(path == name))
+                except FileNotFoundError:
+                    pass
+            elif isinstance(exc, FileNotFoundError):
+                pass
+            else:
+                if not ignore_errors:
+                    raise
+
+        _shutil.rmtree(name, onerror=onexc)
+
+    @classmethod
+    def _cleanup(cls, name, warn_message, ignore_errors=False, delete=True):
+        if delete:
+            cls._rmtree(name, ignore_errors=ignore_errors)
+            _warnings.warn(warn_message, ResourceWarning)
 
     def __repr__(self):
         return "<{} {!r}>".format(self.__class__.__name__, self.name)
@@ -706,8 +823,9 @@ class TemporaryDirectory(object):
         return self.name
 
     def __exit__(self, exc, value, tb):
-        self.cleanup()
+        if self._delete:
+            self.cleanup()
 
     def cleanup(self):
-        if self._finalizer.detach():
-            _shutil.rmtree(self.name)
+        if self._finalizer.detach() or _os.path.exists(self.name):
+            self._rmtree(self.name, ignore_errors=self._ignore_cleanup_errors)

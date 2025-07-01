@@ -119,6 +119,37 @@ class ResourceDenied(unittest.SkipTest):
     and unexpected skips.
     """
 
+_can_symlink = None
+
+TESTFN_ASCII = "{}_{}_tmp".format('@test', os.getpid())
+
+def can_symlink():
+    global _can_symlink
+    if _can_symlink is not None:
+        return _can_symlink
+    # WASI / wasmtime prevents symlinks with absolute paths, see man
+    # openat2(2) RESOLVE_BENEATH. Almost all symlink tests use absolute
+    # paths. Skip symlink tests on WASI for now.
+    src = os.path.abspath(TESTFN)
+    symlink_path = src + "can_symlink"
+    try:
+        os.symlink(src, symlink_path)
+        can = True
+    except (OSError, NotImplementedError, AttributeError):
+        can = False
+    else:
+        os.remove(symlink_path)
+    _can_symlink = can
+    return can
+
+
+def skip_unless_symlink(test):
+    """Skip decorator for tests that require functional symlink"""
+    ok = can_symlink()
+    msg = "Requires functional symlink implementation"
+    return test if ok else unittest.skip(msg)(test)
+
+
 @contextlib.contextmanager
 def _ignore_deprecated_imports(ignore=True):
     """Context manager to suppress package and module deprecation
