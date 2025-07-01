@@ -16,6 +16,7 @@ import functools
 IPV4LENGTH = 32
 IPV6LENGTH = 128
 
+
 class AddressValueError(ValueError):
     """A Value Error related to the address."""
 
@@ -1196,7 +1197,6 @@ class _BaseV4:
     def version(self):
         return self._version
 
-
 class IPv4Address(_BaseV4, _BaseAddress):
 
     """Represent and manipulate single IPv4 Addresses."""
@@ -1264,21 +1264,28 @@ class IPv4Address(_BaseV4, _BaseAddress):
             iana-ipv4-special-registry.
 
         """
-        return (self in IPv4Network('0.0.0.0/8') or
-                self in IPv4Network('10.0.0.0/8') or
-                self in IPv4Network('127.0.0.0/8') or
-                self in IPv4Network('169.254.0.0/16') or
-                self in IPv4Network('172.16.0.0/12') or
-                self in IPv4Network('192.0.0.0/29') or
-                self in IPv4Network('192.0.0.170/31') or
-                self in IPv4Network('192.0.2.0/24') or
-                self in IPv4Network('192.168.0.0/16') or
-                self in IPv4Network('198.18.0.0/15') or
-                self in IPv4Network('198.51.100.0/24') or
-                self in IPv4Network('203.0.113.0/24') or
-                self in IPv4Network('240.0.0.0/4') or
-                self in IPv4Network('255.255.255.255/32'))
+        return (
+            any(self in net for net in self._constants._private_networks)
+            and all(self not in net for net in self._constants._private_networks_exceptions)
+        )
 
+    @property
+    @functools.lru_cache()
+    def is_global(self):
+        """``True`` if the address is defined as globally reachable by
+        iana-ipv4-special-registry_ (for IPv4) or iana-ipv6-special-registry_
+        (for IPv6) with the following exception:
+
+        For IPv4-mapped IPv6-addresses the ``is_private`` value is determined by the
+        semantics of the underlying IPv4 addresses and the following condition holds
+        (see :attr:`IPv6Address.ipv4_mapped`)::
+
+            address.is_global == address.ipv4_mapped.is_global
+
+        ``is_global`` has value opposite to :attr:`is_private`, except for the ``100.64.0.0/10``
+        IPv4 range where they are both ``False``.
+        """
+        return self not in self._constants._public_network and not self.is_private
 
     @property
     def is_multicast(self):
@@ -1325,74 +1332,6 @@ class IPv4Address(_BaseV4, _BaseAddress):
         """
         linklocal_network = IPv4Network('169.254.0.0/16')
         return self in linklocal_network
-
-
-class IPv4Interface(IPv4Address):
-
-    def __init__(self, address):
-        if isinstance(address, (bytes, int)):
-            IPv4Address.__init__(self, address)
-            self.network = IPv4Network(self._ip)
-            self._prefixlen = self._max_prefixlen
-            return
-
-        addr = _split_optional_netmask(address)
-        IPv4Address.__init__(self, addr[0])
-
-        self.network = IPv4Network(address, strict=False)
-        self._prefixlen = self.network._prefixlen
-
-        self.netmask = self.network.netmask
-        self.hostmask = self.network.hostmask
-
-    def __str__(self):
-        return '%s/%d' % (self._string_from_ip_int(self._ip),
-                          self.network.prefixlen)
-
-    def __eq__(self, other):
-        address_equal = IPv4Address.__eq__(self, other)
-        if not address_equal or address_equal is NotImplemented:
-            return address_equal
-        try:
-            return self.network == other.network
-        except AttributeError:
-            # An interface with an associated network is NOT the
-            # same as an unassociated address. That's why the hash
-            # takes the extra info into account.
-            return False
-
-    def __lt__(self, other):
-        address_less = IPv4Address.__lt__(self, other)
-        if address_less is NotImplemented:
-            return NotImplemented
-        try:
-            return self.network < other.network
-        except AttributeError:
-            # We *do* allow addresses and interfaces to be sorted. The
-            # unassociated address is considered less than all interfaces.
-            return False
-
-    def __hash__(self):
-        return hash((self._ip, self._prefixlen, int(self.network.network_address)))
-
-    @property
-    def ip(self):
-        return IPv4Address(self._ip)
-
-    @property
-    def with_prefixlen(self):
-        return '%s/%s' % (self._string_from_ip_int(self._ip),
-                          self._prefixlen)
-
-    @property
-    def with_netmask(self):
-        return '%s/%s' % (self._string_from_ip_int(self._ip),
-                          self.netmask)
-
-    @property
-    def with_hostmask(self):
-        return '%s/%s' % (self._string_from_ip_int(self._ip),
-                          self.hostmask)
 
 
 class IPv4Network(_BaseV4, _BaseNetwork):
@@ -1509,6 +1448,112 @@ class IPv4Network(_BaseV4, _BaseNetwork):
                 not self.is_private)
 
 
+class IPv4Interface(IPv4Address):
+
+    def __init__(self, address):
+        if isinstance(address, (bytes, int)):
+            IPv4Address.__init__(self, address)
+            self.network = IPv4Network(self._ip)
+            self._prefixlen = self._max_prefixlen
+            return
+
+        addr = _split_optional_netmask(address)
+        IPv4Address.__init__(self, addr[0])
+
+        self.network = IPv4Network(address, strict=False)
+        self._prefixlen = self.network._prefixlen
+
+        self.netmask = self.network.netmask
+        self.hostmask = self.network.hostmask
+
+    def __str__(self):
+        return '%s/%d' % (self._string_from_ip_int(self._ip),
+                          self.network.prefixlen)
+
+    def __eq__(self, other):
+        address_equal = IPv4Address.__eq__(self, other)
+        if not address_equal or address_equal is NotImplemented:
+            return address_equal
+        try:
+            return self.network == other.network
+        except AttributeError:
+            # An interface with an associated network is NOT the
+            # same as an unassociated address. That's why the hash
+            # takes the extra info into account.
+            return False
+
+    def __lt__(self, other):
+        address_less = IPv4Address.__lt__(self, other)
+        if address_less is NotImplemented:
+            return NotImplemented
+        try:
+            return self.network < other.network
+        except AttributeError:
+            # We *do* allow addresses and interfaces to be sorted. The
+            # unassociated address is considered less than all interfaces.
+            return False
+
+    def __hash__(self):
+        return hash((self._ip, self._prefixlen, int(self.network.network_address)))
+
+    @property
+    def ip(self):
+        return IPv4Address(self._ip)
+
+    @property
+    def with_prefixlen(self):
+        return '%s/%s' % (self._string_from_ip_int(self._ip),
+                          self._prefixlen)
+
+    @property
+    def with_netmask(self):
+        return '%s/%s' % (self._string_from_ip_int(self._ip),
+                          self.netmask)
+
+    @property
+    def with_hostmask(self):
+        return '%s/%s' % (self._string_from_ip_int(self._ip),
+                          self.hostmask)
+
+class _IPv4Constants:
+    _linklocal_network = [IPv4Network('169.254.0.0/16')]
+
+    _loopback_network = [IPv4Network('127.0.0.0/8')]
+
+    _multicast_network = [IPv4Network('224.0.0.0/4')]
+
+    _public_network = [IPv4Network('100.64.0.0/10')]
+
+    # Not globally reachable address blocks listed on
+    # https://www.iana.org/assignments/iana-ipv4-special-registry/iana-ipv4-special-registry.xhtml
+    _private_networks = [
+        IPv4Network('0.0.0.0/8'),
+        IPv4Network('10.0.0.0/8'),
+        IPv4Network('127.0.0.0/8'),
+        IPv4Network('169.254.0.0/16'),
+        IPv4Network('172.16.0.0/12'),
+        IPv4Network('192.0.0.0/24'),
+        IPv4Network('192.0.0.170/31'),
+        IPv4Network('192.0.2.0/24'),
+        IPv4Network('192.168.0.0/16'),
+        IPv4Network('198.18.0.0/15'),
+        IPv4Network('198.51.100.0/24'),
+        IPv4Network('203.0.113.0/24'),
+        IPv4Network('240.0.0.0/4'),
+        IPv4Network('255.255.255.255/32'),
+        ]
+
+    _private_networks_exceptions = [
+        IPv4Network('192.0.0.9/32'),
+        IPv4Network('192.0.0.10/32'),
+    ]
+
+    _reserved_network = IPv4Network('240.0.0.0/4')
+
+    _unspecified_address = IPv4Address('0.0.0.0')
+
+IPv4Address._constants = _IPv4Constants
+IPv4Network._constants = _IPv4Constants
 
 class _BaseV6:
 
@@ -1874,16 +1919,13 @@ class IPv6Address(_BaseV6, _BaseAddress):
             iana-ipv6-special-registry.
 
         """
-        return (self in IPv6Network('::1/128') or
-                self in IPv6Network('::/128') or
-                self in IPv6Network('::ffff:0:0/96') or
-                self in IPv6Network('100::/64') or
-                self in IPv6Network('2001::/23') or
-                self in IPv6Network('2001:2::/48') or
-                self in IPv6Network('2001:db8::/32') or
-                self in IPv6Network('2001:10::/28') or
-                self in IPv6Network('fc00::/7') or
-                self in IPv6Network('fe80::/10'))
+        ipv4_mapped = self.ipv4_mapped
+        if ipv4_mapped is not None:
+            return ipv4_mapped.is_private
+        return (
+            any(self in net for net in self._constants._private_networks)
+            and all(self not in net for net in self._constants._private_networks_exceptions)
+        )
 
     @property
     def is_global(self):
@@ -2148,3 +2190,51 @@ class IPv6Network(_BaseV6, _BaseNetwork):
         """
         return (self.network_address.is_site_local and
                 self.broadcast_address.is_site_local)
+
+class _IPv6Constants:
+
+    _linklocal_network = IPv6Network('fe80::/10')
+
+    _multicast_network = IPv6Network('ff00::/8')
+
+    # Not globally reachable address blocks listed on
+    # https://www.iana.org/assignments/iana-ipv6-special-registry/iana-ipv6-special-registry.xhtml
+    _private_networks = [
+        IPv6Network('::1/128'),
+        IPv6Network('::/128'),
+        IPv6Network('::ffff:0:0/96'),
+        IPv6Network('64:ff9b:1::/48'),
+        IPv6Network('100::/64'),
+        IPv6Network('2001::/23'),
+        IPv6Network('2001:db8::/32'),
+        # IANA says N/A, let's consider it not globally reachable to be safe
+        IPv6Network('2002::/16'),
+        IPv6Network('fc00::/7'),
+        IPv6Network('fe80::/10'),
+        ]
+
+    _private_networks_exceptions = [
+        IPv6Network('2001:1::1/128'),
+        IPv6Network('2001:1::2/128'),
+        IPv6Network('2001:3::/32'),
+        IPv6Network('2001:4:112::/48'),
+        IPv6Network('2001:20::/28'),
+        IPv6Network('2001:30::/28'),
+    ]
+
+    _reserved_networks = [
+        IPv6Network('::/8'), IPv6Network('100::/8'),
+        IPv6Network('200::/7'), IPv6Network('400::/6'),
+        IPv6Network('800::/5'), IPv6Network('1000::/4'),
+        IPv6Network('4000::/3'), IPv6Network('6000::/3'),
+        IPv6Network('8000::/3'), IPv6Network('A000::/3'),
+        IPv6Network('C000::/3'), IPv6Network('E000::/4'),
+        IPv6Network('F000::/5'), IPv6Network('F800::/6'),
+        IPv6Network('FE00::/9'),
+    ]
+
+    _sitelocal_network = IPv6Network('fec0::/10')
+
+
+IPv6Address._constants = _IPv6Constants
+IPv6Network._constants = _IPv6Constants
