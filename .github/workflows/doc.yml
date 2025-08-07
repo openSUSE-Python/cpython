@@ -9,10 +9,6 @@ on:
   #  paths:
   #  - 'Doc/**'
   pull_request:
-    branches:
-    - master
-    - 3.8
-    - 3.7
     paths:
     - 'Doc/**'
     - 'Misc/**'
