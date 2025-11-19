@@ -145,6 +145,8 @@ static PyModuleDef readlinemodule;
 
 #define readlinestate_global ((readlinestate *)PyModule_GetState(PyState_FindModule(&readlinemodule)))
 
+static int _py_get_history_length(void);
+static void _py_free_history_entry(HIST_ENTRY *entry);
 
 /* Convert to/from multibyte C strings */
 
@@ -384,6 +386,27 @@ readline_set_history_length_impl(PyObject *module, int length)
 /*[clinic end generated code: output=e161a53e45987dc7 input=b8901bf16488b760]*/
 {
     _history_length = length;
+
+    if (length < 0) {
+        stifle_history(-1);
+    }
+    else {
+        int current_length = _py_get_history_length();
+        if (length < current_length) {
+#if defined(RL_READLINE_VERSION) && RL_READLINE_VERSION >= 0x0500
+            HISTORY_STATE *state = history_get_history_state();
+            if (state) {
+                int i;
+                for (i = 0; i < current_length - length; i++) {
+                    _py_free_history_entry(remove_history(0));
+                }
+                state->length = length;
+                free(state);
+            }
+#endif
+        }
+        stifle_history(length);
+    }
     Py_RETURN_NONE;
 }
 
