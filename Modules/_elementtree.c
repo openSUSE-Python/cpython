@@ -3299,8 +3299,14 @@ _elementtree_XMLParser___init___impl(XMLParserObject *self, PyObject *html,
         PyErr_NoMemory();
         return -1;
     }
-    /* expat < 2.1.0 has no XML_SetHashSalt() */
-    if (EXPAT(SetHashSalt) != NULL) {
+    // Prefer 16-byte entropy, only expat >= 2.8.0.  Reuse the leading
+    // bytes of the hash secret to keep _Py_HashSecret_t ABI-stable.
+    // See gh-149018
+    if (EXPAT(SetHashSalt16Bytes) != NULL) {
+        EXPAT(SetHashSalt16Bytes)(self->parser,
+                                   _Py_HashSecret.uc);
+    }
+    else if (EXPAT(SetHashSalt) != NULL) {
         EXPAT(SetHashSalt)(self->parser,
                            (unsigned long)_Py_HashSecret.expat.hashsalt);
     }
