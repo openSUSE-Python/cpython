@@ -60,7 +60,7 @@ jobs:
     - uses: actions/checkout@v4
 
     - name: Install All Dependencies
-      run: sh -x ./.github/workflows/posix-deps-zypp.sh
+      run: sh -x ./.github/posix-deps-zypp.sh
 
     - name: 'Restore OpenSSL build'
       if: matrix.task == 'build-and-test'
@@ -76,7 +76,7 @@ jobs:
       env:
         CFLAGS: -g3 -O0
       run: |
-        ./configure --enable-shared --with-fpectl
+        ./configure --enable-shared --with-fpectl --with-system-expat
         make -j4
 
     - name: Check for changes in the ABI
@@ -85,15 +85,13 @@ jobs:
 
     # === Steps for Generated Files Check ===
     - name: Build CPython for Generated Files Check
-      # if: matrix.task == 'generated-files'
-      if: false
+      if: matrix.task == 'generated-files'
       run: |
-        ./configure --with-pydebug
+        ./configure --with-pydebug --with-system-expat
         make -j4 regen-all
 
     - name: Check for changes in generated files
-      # if: matrix.task == 'generated-files'
-      if: false
+      if: matrix.task == 'generated-files'
       run: |
         if ! git diff --quiet; then
           echo "Generated files are not up to date. Please run 'make regen-all' and commit the changes."
@@ -103,8 +101,7 @@ jobs:
         fi
 
     - name: Check exported libpython symbols
-      # if: matrix.task == 'generated-files'
-      if: false
+      if: matrix.task == 'generated-files'
       run: make smelly
 
     # === Steps for Full Build and Test ===
@@ -114,7 +111,7 @@ jobs:
 
     - name: Configure CPython
       if: matrix.task == 'build-and-test'
-      run: ./configure --with-pydebug --with-openssl=$PWD/multissl/openssl/$OPENSSL_VER
+      run: ./configure --with-pydebug --with-openssl=$PWD/multissl/openssl/$OPENSSL_VER --with-system-expat
 
     - name: Build CPython
       if: matrix.task == 'build-and-test'
