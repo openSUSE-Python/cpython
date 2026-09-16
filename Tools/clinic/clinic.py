@@ -3788,7 +3788,8 @@ class DSLParser:
                     py_default = 'None'
                     c_default = "NULL"
                 elif (isinstance(expr, ast.BinOp) or
-                    (isinstance(expr, ast.UnaryOp) and not isinstance(expr.operand, ast.Num))):
+                      (isinstance(expr, ast.UnaryOp) and
+                       not isinstance(expr.operand, ast.Num))):
                     c_default = kwargs.get("c_default")
                     if not (isinstance(c_default, str) and c_default):
                         fail("When you specify an expression (" + repr(default) + ") as your default value,\nyou MUST specify a valid c_default.")
