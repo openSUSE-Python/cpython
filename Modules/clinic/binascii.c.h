@@ -66,7 +66,7 @@ exit:
 }
 
 PyDoc_STRVAR(binascii_a2b_base64__doc__,
-"a2b_base64($module, /, data, *, strict_mode=False)\n"
+"a2b_base64($module, data, /, *, strict_mode=False)\n"
 "--\n"
 "\n"
 "Decode a line of base64 data.\n"
@@ -85,7 +85,7 @@ static PyObject *
 binascii_a2b_base64(PyObject *module, PyObject **args, Py_ssize_t nargs, PyObject *kwnames)
 {
     PyObject *return_value = NULL;
-    static const char * const _keywords[] = {"data", "strict_mode", NULL};
+    static const char * const _keywords[] = {"", "strict_mode", NULL};
     static _PyArg_Parser _parser = {"O&|$p:a2b_base64", _keywords, 0};
     Py_buffer data = {NULL, NULL};
     int strict_mode = 0;
@@ -558,4 +558,4 @@ exit:
 
     return return_value;
 }
-/*[clinic end generated code: output=03ff6186029db42d input=a9049054013a1b77]*/
+/*[clinic end generated code: output=ee431d8ccdcdb500 input=a9049054013a1b77]*/
