@@ -407,7 +407,7 @@ strict_mode
 
 static PyObject *
 binascii_a2b_base64_impl(PyObject *module, Py_buffer *data, int strict_mode)
-/*[clinic end generated code: output=5409557788d4f975 input=8c06d486533af0fb]*/
+/*[clinic end generated code: output=5409557788d4f975 input=d88c81c1053efbe8]*/
 {
     const unsigned char *ascii_data;
     unsigned char *bin_data;
