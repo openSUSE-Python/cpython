@@ -42,6 +42,7 @@ import suspicious
 ISSUE_URI = 'https://bugs.python.org/issue%s'
 GH_ISSUE_URI = 'https://github.com/python/cpython/issues/%s'
 SOURCE_URI = 'https://github.com/python/cpython/tree/3.6/%s'
+CVE_URI = 'https://www.cve.org/CVERecord?id=CVE-%s'
 
 # monkey-patch reST parser to disable alphabetic and roman enumerated lists
 from docutils.parsers.rst.states import Body
@@ -97,6 +98,15 @@ def gh_issue_role(typ, rawtext, text, lineno, inliner, options={}, content=[]):
     issue = utils.unescape(text)
     text = 'gh-' + issue
     refnode = nodes.reference(text, text, refuri=GH_ISSUE_URI % issue)
+    return [refnode], []
+
+
+# Support for linking to CVE records in backported NEWS entries.
+
+def cve_role(typ, rawtext, text, lineno, inliner, options={}, content=[]):
+    cve = utils.unescape(text)
+    text = 'CVE-' + cve
+    refnode = nodes.reference(text, text, refuri=CVE_URI % cve)
     return [refnode], []
 
 
@@ -414,6 +424,7 @@ def setup(app):
     app.add_role('issue', issue_role)
     app.add_role('gh', gh_issue_role)
     app.add_role('source', source_role)
+    app.add_role('cve', cve_role)
     app.add_directive('impl-detail', ImplementationDetail)
     app.add_directive('deprecated-removed', DeprecatedRemoved)
     app.add_builder(PydocTopicsBuilder)
