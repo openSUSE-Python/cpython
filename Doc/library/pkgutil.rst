@@ -226,9 +226,10 @@ support.
       d = os.path.dirname(sys.modules[package].__file__)
       data = open(os.path.join(d, resource), 'rb').read()
 
-   Like the :func:`open` function, :func:`!get_data` can follow parent
-   directories (``../``) and absolute paths (starting with ``/`` or ``C:/``,
-   for example).
+   The *resource* argument must be a relative path that stays within the
+   package directory.  Absolute paths (starting with ``/`` or ``C:/``,
+   for example) and paths containing a parent directory component
+   (``..``) raise :exc:`ValueError`.
 
    .. warning::
 
