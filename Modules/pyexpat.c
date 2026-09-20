@@ -516,10 +516,23 @@ VOID_HANDLER(XmlDecl,
               conv_string_to_unicode ,version, conv_string_to_unicode ,encoding,
               standalone))
 
+/* Hard limit on content-model nesting.  Py_EnterRecursiveCall() only
+   tracks the Python recursion limit, which Python code can raise and
+   which therefore does not bound C stack usage.  Keep this limit
+   independent of sys.setrecursionlimit() to avoid a C stack overflow. */
+#define MAX_CONTENT_MODEL_DEPTH 500
+
 static PyObject *
 conv_content_model(XML_Content * const model,
-                   PyObject *(*conv_string)(const XML_Char *))
+                   PyObject *(*conv_string)(const XML_Char *),
+                   int depth)
 {
+    if (depth > MAX_CONTENT_MODEL_DEPTH) {
+        PyErr_SetString(PyExc_RecursionError,
+                        "maximum recursion depth exceeded "
+                        "in conv_content_model");
+        return NULL;
+    }
     if (Py_EnterRecursiveCall(" in conv_content_model")) {
         return NULL;
     }
@@ -532,7 +545,7 @@ conv_content_model(XML_Content * const model,
         assert(model->numchildren < INT_MAX);
         for (i = 0; i < (int)model->numchildren; ++i) {
             PyObject *child = conv_content_model(&model->children[i],
-                                                 conv_string);
+                                                 conv_string, depth + 1);
             if (child == NULL) {
                 Py_XDECREF(children);
                 goto done;
@@ -565,7 +578,7 @@ my_ElementDeclHandler(void *userData,
 
         if (flush_character_buffer(self) < 0)
             goto finally;
-        modelobj = conv_content_model(model, (conv_string_to_unicode));
+        modelobj = conv_content_model(model, (conv_string_to_unicode), 0);
         if (modelobj == NULL) {
             flag_error(self);
             goto finally;
