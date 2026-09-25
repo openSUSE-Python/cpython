@@ -109,22 +109,17 @@ struct py_ssl_library_code {
 };
 
 /* Include generated data (error codes) */
-#if (OPENSSL_VERSION_NUMBER >= 0x30000000L)
+#if defined(PY_OPENSSL_3_API)
 #include "_ssl_data_300.h"
-#elif (OPENSSL_VERSION_NUMBER >= 0x10101000L) && !defined(LIBRESSL_VERSION_NUMBER)
+#elif defined(PY_OPENSSL_1_1_1)
 #include "_ssl_data_111.h"
 #else
+/* OpenSSL 1.0.2 - 1.1.0 and LibreSSL */
 #include "_ssl_data.h"
 #endif
 
-/* Openssl comes with TLSv1.1 and TLSv1.2 between 1.0.0h and 1.0.1
-    http://www.openssl.org/news/changelog.html
- */
-#if OPENSSL_VERSION_NUMBER >= 0x10001000L
-# define HAVE_TLSv1_2 1
-#else
-# define HAVE_TLSv1_2 0
-#endif
+/* TLSv1.1 and TLSv1.2 are available in all supported OpenSSL versions */
+#define HAVE_TLSv1_2 1
 
 /* SNI support (client- and server-side) appeared in OpenSSL 1.0.0 and 0.9.8f
  * This includes the SSL_set_SSL_CTX() function.
@@ -231,14 +226,8 @@ static unsigned int _ssl_locks_count = 0;
 
 #define X509_NAME_MAXLEN 256
 
-/* SSL_CTX_clear_options() and SSL_clear_options() were first added in
- * OpenSSL 0.9.8m but do not appear in some 0.9.9-dev versions such the
- * 0.9.9 from "May 2008" that NetBSD 5.0 uses. */
-#if OPENSSL_VERSION_NUMBER >= 0x009080dfL && OPENSSL_VERSION_NUMBER != 0x00909000L
-# define HAVE_SSL_CTX_CLEAR_OPTIONS
-#else
-# undef HAVE_SSL_CTX_CLEAR_OPTIONS
-#endif
+/* SSL_CTX_clear_options() is available in all supported OpenSSL versions */
+#define HAVE_SSL_CTX_CLEAR_OPTIONS
 
 /* In case of 'tls-unique' it will be 12 bytes for TLS, 36 bytes for
  * older SSL, but let's be safe */
@@ -479,7 +468,8 @@ static PyObject *
 PySSL_SetError(PySSLSocket *obj, int ret, const char *filename, int lineno)
 {
     PyObject *type = PySSLErrorObject;
-    char *errstr = NULL;
+    const char *errstr = NULL;
+    char verify_buf[256];
     _PySSLError err;
     enum py_ssl_error p = PY_SSL_ERROR_NONE;
     unsigned long e = 0;
@@ -544,11 +534,6 @@ PySSL_SetError(PySSLSocket *obj, int ret, const char *filename, int lineno)
                     errstr = "Some I/O error occurred";
                 }
             } else {
-                if (ERR_GET_LIB(e) == ERR_LIB_SSL &&
-                        ERR_GET_REASON(e) == SSL_R_CERTIFICATE_VERIFY_FAILED) {
-                    /* Python 3.6 does not have ssl.SSLCertVerificationError */
-                    type = PySSLErrorObject;
-                }
                 p = PY_SSL_ERROR_SYSCALL;
             }
             break;
@@ -556,9 +541,23 @@ PySSL_SetError(PySSLSocket *obj, int ret, const char *filename, int lineno)
         case SSL_ERROR_SSL:
         {
             p = PY_SSL_ERROR_SSL;
-            if (e == 0)
+            if (e == 0) {
                 /* possible? */
                 errstr = "A failure in the SSL library occurred";
+            }
+            else if (ERR_GET_LIB(e) == ERR_LIB_SSL &&
+                     ERR_GET_REASON(e) == SSL_R_CERTIFICATE_VERIFY_FAILED) {
+                /* Python 3.6 has no ssl.SSLCertVerificationError; at least
+                   tell the user why the verification failed. */
+                long verify_code = SSL_get_verify_result(obj->ssl);
+                const char *reason = ERR_reason_error_string(e);
+                const char *verify_str = X509_verify_cert_error_string(verify_code);
+                if (verify_code != X509_V_OK && reason && verify_str) {
+                    PyOS_snprintf(verify_buf, sizeof(verify_buf),
+                                  "%s: %s", reason, verify_str);
+                    errstr = verify_buf;
+                }
+            }
             break;
         }
         default:
@@ -573,12 +572,14 @@ PySSL_SetError(PySSLSocket *obj, int ret, const char *filename, int lineno)
 
 static PyObject *
 _setSSLError (const char *errstr, int errcode, const char *filename, int lineno) {
+    unsigned long e = 0;
 
     if (errstr == NULL)
-        errcode = ERR_peek_last_error();
-    else
-        errcode = 0;
-    fill_and_set_sslerror(PySSLErrorObject, errcode, errstr, lineno, errcode);
+        e = ERR_peek_last_error();
+    /* The OpenSSL error code is stored in unsigned long; with OpenSSL 3
+       system errors have the top bit set, so don't squeeze it into an int
+       before decoding it. errno keeps its historic (truncated) value. */
+    fill_and_set_sslerror(PySSLErrorObject, (int)e, errstr, lineno, e);
     ERR_clear_error();
     return NULL;
 }
@@ -658,7 +659,6 @@ newPySSLSocket(PySSLContext *sslctx, PySocketSockObject *sock,
  * available on all platforms. Use OpenSSL's IP address parser. It's
  * available since 1.0.2 and LibreSSL since at least 2.3.0. */
         int send_sni = 1;
-#if OPENSSL_VERSION_NUMBER >= 0x10200000L
         ASN1_OCTET_STRING *ip = a2i_IPADDRESS(server_hostname);
         if (ip == NULL) {
             send_sni = 1;
@@ -667,22 +667,6 @@ newPySSLSocket(PySSLContext *sslctx, PySocketSockObject *sock,
             send_sni = 0;
             ASN1_OCTET_STRING_free(ip);
         }
-#elif defined(HAVE_INET_PTON)
-#ifdef ENABLE_IPV6
-        char packed[Py_MAX(sizeof(struct in_addr), sizeof(struct in6_addr))];
-#else
-        char packed[sizeof(struct in_addr)];
-#endif /* ENABLE_IPV6 */
-        if (inet_pton(AF_INET, server_hostname, packed)) {
-            send_sni = 0;
-#ifdef ENABLE_IPV6
-        } else if(inet_pton(AF_INET6, server_hostname, packed)) {
-            send_sni = 0;
-#endif /* ENABLE_IPV6 */
-        } else {
-            send_sni = 1;
-        }
-#endif /* HAVE_INET_PTON */
         if (send_sni) {
             SSL_set_tlsext_host_name(self->ssl, server_hostname);
         }
@@ -1641,7 +1625,6 @@ cipher_to_tuple(const SSL_CIPHER *cipher)
     return NULL;
 }
 
-#if OPENSSL_VERSION_NUMBER >= 0x10002000UL
 static PyObject *
 cipher_to_dict(const SSL_CIPHER *cipher)
 {
@@ -1698,7 +1681,6 @@ cipher_to_dict(const SSL_CIPHER *cipher)
 #endif
        );
 }
-#endif
 
 /*[clinic input]
 _ssl._SSLSocket.shared_ciphers
@@ -2962,7 +2944,6 @@ _ssl__SSLContext_set_ciphers_impl(PySSLContext *self, const char *cipherlist)
     Py_RETURN_NONE;
 }
 
-#if OPENSSL_VERSION_NUMBER >= 0x10002000UL
 /*[clinic input]
 _ssl._SSLContext.get_ciphers
 [clinic start generated code]*/
@@ -3005,7 +2986,6 @@ _ssl__SSLContext_get_ciphers_impl(PySSLContext *self)
     return result;
 
 }
-#endif
 
 
 #if HAVE_NPN || HAVE_ALPN
@@ -3538,7 +3518,8 @@ _add_ca_certs(PySSLContext *self, void *data, Py_ssize_t len,
 {
     BIO *biobuf = NULL;
     X509_STORE *store;
-    int retval = -1, err, loaded = 0;
+    int retval = -1, loaded = 0;
+    unsigned long err;
 
     assert(filetype == SSL_FILETYPE_ASN1 || filetype == SSL_FILETYPE_PEM);
 
@@ -5363,7 +5344,6 @@ static PyMethodDef PySSL_methods[] = {
 
 static PyThread_type_lock *_ssl_locks = NULL;
 
-#if OPENSSL_VERSION_NUMBER >= 0x10000000
 /* use new CRYPTO_THREADID API. */
 static void
 _ssl_threadid_callback(CRYPTO_THREADID *id)
@@ -5371,13 +5351,6 @@ _ssl_threadid_callback(CRYPTO_THREADID *id)
     CRYPTO_THREADID_set_numeric(id,
                                 (unsigned long)PyThread_get_thread_ident());
 }
-#else
-/* deprecated CRYPTO_set_id_callback() API. */
-static unsigned long
-_ssl_thread_id_function (void) {
-    return PyThread_get_thread_ident();
-}
-#endif
 
 static void _ssl_thread_locking_function
     (int mode, int n, const char *file, int line) {
@@ -5430,11 +5403,7 @@ static int _setup_ssl_threads(void) {
             }
         }
         CRYPTO_set_locking_callback(_ssl_thread_locking_function);
-#if OPENSSL_VERSION_NUMBER >= 0x10000000
         CRYPTO_THREADID_set_callback(_ssl_threadid_callback);
-#else
-        CRYPTO_set_id_callback(_ssl_thread_id_function);
-#endif
     }
     return 1;
 }
