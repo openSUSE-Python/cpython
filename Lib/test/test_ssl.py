@@ -21,7 +21,6 @@ import asyncore
 import weakref
 import platform
 import re
-import sysconfig
 import functools
 try:
     import ctypes
@@ -43,7 +42,6 @@ IS_LIBRESSL = ssl.OPENSSL_VERSION.startswith('LibreSSL')
 IS_OPENSSL_1_1 = not IS_LIBRESSL and (ssl.OPENSSL_VERSION_INFO >= (1, 1, 0) and ssl.OPENSSL_VERSION_INFO < (2, 0))
 IS_OPENSSL_1_1_1 = not IS_LIBRESSL and (ssl.OPENSSL_VERSION_INFO >= (1, 1, 1) and ssl.OPENSSL_VERSION_INFO < (2, 0))
 IS_OPENSSL_3_0_0 = not IS_LIBRESSL and ssl.OPENSSL_VERSION_INFO >= (3, 0, 0)
-PY_SSL_DEFAULT_CIPHERS = sysconfig.get_config_var('PY_SSL_DEFAULT_CIPHERS')
 
 def data_file(*name):
     return os.path.join(os.path.dirname(__file__), *name)
@@ -99,8 +97,26 @@ OP_CIPHER_SERVER_PREFERENCE = getattr(ssl, "OP_CIPHER_SERVER_PREFERENCE", 0)
 OP_ENABLE_MIDDLEBOX_COMPAT = getattr(ssl, "OP_ENABLE_MIDDLEBOX_COMPAT", 0)
 OP_IGNORE_UNEXPECTED_EOF = getattr(ssl, "OP_IGNORE_UNEXPECTED_EOF", 0)
 
+LEGACY_TLS_PROTOCOLS = {getattr(ssl, name) for name in
+                        ('PROTOCOL_TLSv1', 'PROTOCOL_TLSv1_1', 'PROTOCOL_SSLv3')
+                        if hasattr(ssl, name)}
+
+def seclevel_workaround(*ctxs):
+    """Lower the security level for TLS < 1.2 on OpenSSL 3.
+
+    OpenSSL 3 refuses TLS 1.0 and 1.1 at security level 1 or higher,
+    because they can only use SHA-1 based signatures.
+    """
+    if IS_OPENSSL_3_0_0 and any(ctx.protocol in LEGACY_TLS_PROTOCOLS
+                                for ctx in ctxs):
+        # Both peers must accept the legacy protocol version.
+        for ctx in ctxs:
+            ctx.set_ciphers("@SECLEVEL=0:ALL")
+
 def clean_OpenSSL30_san(in_tup):
-    if ssl._OPENSSL_API_VERSION >= (3, 0, 0):
+    # OpenSSL 3 no longer appends a newline to IPv6 addresses; this is
+    # a property of the library we run with, not the headers we built with.
+    if IS_OPENSSL_3_0_0:
         return tuple([(x,y.strip() if type(y) == str else y)
                       for x, y in in_tup])
     else:
@@ -170,26 +186,50 @@ def skip_if_openssl_cnf_minprotocol_gt_tls11(func):
     """
     @functools.wraps(func)
     def f(*args, **kwargs):
-        if IS_OPENSSL_3_0_0:
-            raise unittest.SkipTest('OpenSSL 3 effectively disables TLS < 1.2')
         openssl_cnf = os.environ.get("OPENSSL_CONF", "/etc/ssl/openssl.cnf")
-        try:
-            with open(openssl_cnf, "r") as config:
-                for line in config:
-                    match = re.match(r"MinProtocol\s*=\s*(TLSv\d+\S*)", line)
-                    if match:
-                        tls_ver = match.group(1)
-                        if tls_ver > "TLSv1.1":
-                            raise unittest.SkipTest(
-                                "%s has MinProtocol = %s which is > TLSv1." %
-                                (openssl_cnf, tls_ver))
-        except (EnvironmentError, UnicodeDecodeError) as err:
-            # no config file found, etc.
-            if support.verbose:
-                sys.stdout.write("\n Could not scan %s for MinProtocol: %s\n"
-                                 % (openssl_cnf, err))
+        tls_ver = _openssl_cnf_min_protocol(openssl_cnf)
+        if tls_ver is not None and tls_ver > "TLSv1.1":
+            raise unittest.SkipTest(
+                "%s has MinProtocol = %s which is > TLSv1.1." %
+                (openssl_cnf, tls_ver))
         return func(*args, **kwargs)
     return f
+
+
+def _openssl_cnf_min_protocol(path, _depth=0):
+    """Return the (TLS.)MinProtocol value of an OpenSSL config, or None.
+
+    Follows ".include" directives, which system-wide crypto policies
+    (Fedora, openSUSE) use to set e.g. "TLS.MinProtocol = TLSv1.2".
+    """
+    if _depth > 8:
+        return None
+    try:
+        with open(path, "r") as config:
+            lines = config.readlines()
+    except (EnvironmentError, UnicodeDecodeError) as err:
+        # no config file found, etc.
+        if support.verbose:
+            sys.stdout.write("\n Could not scan %s for MinProtocol: %s\n"
+                             % (path, err))
+        return None
+    for line in lines:
+        match = re.match(r"\s*(?:TLS\.)?MinProtocol\s*=\s*(TLSv\d+\S*)", line)
+        if match:
+            return match.group(1)
+        match = re.match(r"\s*\.include\s*=?\s*(\S+)", line)
+        if match:
+            included = match.group(1)
+            if not os.path.isabs(included):
+                included = os.path.join(os.path.dirname(path), included)
+            candidates = ([os.path.join(included, name)
+                           for name in sorted(os.listdir(included))]
+                          if os.path.isdir(included) else [included])
+            for candidate in candidates:
+                tls_ver = _openssl_cnf_min_protocol(candidate, _depth + 1)
+                if tls_ver is not None:
+                    return tls_ver
+    return None
 
 
 needs_sni = unittest.skipUnless(ssl.HAS_SNI, "SNI support needed for this test")
@@ -434,8 +474,8 @@ class BasicSocketTests(unittest.TestCase):
         # Some sanity checks follow
         # >= 0.9
         self.assertGreaterEqual(n, 0x900000)
-        # < 3.3
-        self.assertLess(n, 0x33000000)
+        # < 4.0
+        self.assertLess(n, 0x40000000)
         major, minor, fix, patch, status = t
         self.assertGreaterEqual(major, 0)
         self.assertLess(major, 4)
@@ -2392,6 +2432,8 @@ if _have_threads:
         if client_context.protocol == ssl.PROTOCOL_SSLv23:
             client_context.set_ciphers("ALL")
 
+        seclevel_workaround(server_context, client_context)
+
         for ctx in (client_context, server_context):
             ctx.verify_mode = certsreqs
             ctx.load_cert_chain(CERTFILE)
@@ -2427,11 +2469,11 @@ if _have_threads:
             if support.verbose:
                 sys.stdout.write("\n")
             for protocol in PROTOCOLS:
-                if protocol in {ssl.PROTOCOL_TLS_CLIENT, ssl.PROTOCOL_TLS_SERVER,
-                                ssl.PROTOCOL_TLSv1, ssl.PROTOCOL_TLSv1_1}:
+                if protocol in {ssl.PROTOCOL_TLS_CLIENT, ssl.PROTOCOL_TLS_SERVER}:
                     continue
                 with self.subTest(protocol=ssl._PROTOCOL_NAMES[protocol]):
                     context = ssl.SSLContext(protocol)
+                    seclevel_workaround(context)
                     context.load_cert_chain(CERTFILE)
                     server_params_test(context, context,
                                        chatty=True, connectionchatty=True)
