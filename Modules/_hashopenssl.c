@@ -45,6 +45,44 @@ module _hashlib
 #define HAS_FAST_PKCS5_PBKDF2_HMAC 1
 #endif
 
+/* Digest lookup.
+ *
+ * With OpenSSL 3 digests are fetched explicitly from the providers, so
+ * that the default library context and its properties (e.g. "fips=yes")
+ * are honoured and no legacy EVP_MD objects are used.  The result is
+ * owned by the caller and must be released with PY_EVP_MD_free().
+ * Older libraries return a static EVP_MD which must not be freed.
+ */
+#ifdef PY_OPENSSL_3_API
+typedef EVP_MD PY_EVP_MD;
+
+static PY_EVP_MD *
+py_digest_by_name(const char *name)
+{
+    PY_EVP_MD *digest;
+
+    ERR_set_mark();
+    digest = EVP_MD_fetch(NULL, name, NULL);
+    if (digest == NULL) {
+        /* Retry with the canonical name of a legacy alias such as
+           "RSA-SHA256", for compatibility with openssl_md_meth_names. */
+        const EVP_MD *legacy = EVP_get_digestbyname(name);
+        if (legacy != NULL) {
+            digest = EVP_MD_fetch(NULL, EVP_MD_get0_name(legacy), NULL);
+        }
+    }
+    /* Callers report a missing digest themselves. */
+    ERR_pop_to_mark();
+    return digest;
+}
+
+#define PY_EVP_MD_free(md) EVP_MD_free(md)
+#else
+typedef const EVP_MD PY_EVP_MD;
+#define py_digest_by_name(name) EVP_get_digestbyname(name)
+#define PY_EVP_MD_free(md) ((void)(md))
+#endif
+
 typedef struct {
     PyObject_HEAD
     PyObject            *name;  /* name of this hash algorithm */
@@ -343,7 +381,8 @@ EVP_tp_init(EVPobject *self, PyObject *args, PyObject *kwds)
     PyObject *data_obj = NULL;
     Py_buffer view;
     char *nameStr;
-    const EVP_MD *digest;
+    PY_EVP_MD *digest;
+    int ok;
 
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "O|O:HASH", kwlist,
                                      &name_obj, &data_obj)) {
@@ -360,14 +399,16 @@ EVP_tp_init(EVPobject *self, PyObject *args, PyObject *kwds)
         return -1;
     }
 
-    digest = EVP_get_digestbyname(nameStr);
+    digest = py_digest_by_name(nameStr);
     if (!digest) {
         PyErr_SetString(PyExc_ValueError, "unknown hash function");
         if (data_obj)
             PyBuffer_Release(&view);
         return -1;
     }
-    if (!EVP_DigestInit(self->ctx, digest)) {
+    ok = EVP_DigestInit(self->ctx, digest);
+    PY_EVP_MD_free(digest);
+    if (!ok) {
         _setException(PyExc_ValueError);
         if (data_obj)
             PyBuffer_Release(&view);
@@ -468,7 +509,11 @@ EVPnew(PyObject *name_obj,
         return NULL;
 
     if (initial_ctx) {
-        EVP_MD_CTX_copy(self->ctx, initial_ctx);
+        if (!EVP_MD_CTX_copy(self->ctx, initial_ctx)) {
+            _setException(PyExc_ValueError);
+            Py_DECREF(self);
+            return NULL;
+        }
     } else {
         if (!EVP_DigestInit(self->ctx, digest)) {
             _setException(PyExc_ValueError);
@@ -508,7 +553,7 @@ EVP_new(PyObject *self, PyObject *args, PyObject *kwdict)
     Py_buffer view = { 0 };
     PyObject *ret_obj;
     char *name;
-    const EVP_MD *digest;
+    PY_EVP_MD *digest;
 
     if (!PyArg_ParseTupleAndKeywords(args, kwdict, "O|O:new", kwlist,
                                      &name_obj, &data_obj)) {
@@ -523,9 +568,11 @@ EVP_new(PyObject *self, PyObject *args, PyObject *kwdict)
     if (data_obj)
         GET_BUFFER_VIEW_OR_ERROUT(data_obj, &view);
 
-    digest = EVP_get_digestbyname(name);
+    digest = py_digest_by_name(name);
 
     ret_obj = EVPnew(name_obj, digest, NULL, (unsigned char*)view.buf, view.len);
+    if (digest != NULL)
+        PY_EVP_MD_free(digest);
 
     if (data_obj)
         PyBuffer_Release(&view);
@@ -634,7 +681,7 @@ pbkdf2_hmac(PyObject *self, PyObject *args, PyObject *kwdict)
     Py_buffer password, salt;
     long iterations, dklen;
     int retval;
-    const EVP_MD *digest;
+    PY_EVP_MD *digest = NULL;
 
     if (!PyArg_ParseTupleAndKeywords(args, kwdict, "sy*y*l|O:pbkdf2_hmac",
                                      kwlist, &name, &password, &salt,
@@ -642,7 +689,7 @@ pbkdf2_hmac(PyObject *self, PyObject *args, PyObject *kwdict)
         return NULL;
     }
 
-    digest = EVP_get_digestbyname(name);
+    digest = py_digest_by_name(name);
     if (digest == NULL) {
         PyErr_SetString(PyExc_ValueError, "unsupported hash type");
         goto end;
@@ -718,6 +765,8 @@ pbkdf2_hmac(PyObject *self, PyObject *args, PyObject *kwdict)
     }
 
   end:
+    if (digest != NULL)
+        PY_EVP_MD_free(digest);
     PyBuffer_Release(&password);
     PyBuffer_Release(&salt);
     return key_obj;
@@ -926,9 +975,21 @@ generate_hash_name_list(void)
         } \
      \
         if (CONST_new_ ## NAME ## _ctx_p == NULL) { \
+            PY_EVP_MD *digest; \
+            int ok; \
             EVP_MD_CTX *ctx_p = EVP_MD_CTX_new(); \
-            if (!EVP_get_digestbyname(#NAME) || \
-                !EVP_DigestInit(ctx_p, EVP_get_digestbyname(#NAME))) { \
+            if (ctx_p == NULL) { \
+                return PyErr_NoMemory(); \
+            } \
+            digest = py_digest_by_name(#NAME); \
+            if (digest == NULL) { \
+                EVP_MD_CTX_free(ctx_p); \
+                PyErr_SetString(PyExc_ValueError, "unsupported hash type"); \
+                return NULL; \
+            } \
+            ok = EVP_DigestInit(ctx_p, digest); \
+            PY_EVP_MD_free(digest); \
+            if (!ok) { \
                 _setException(PyExc_ValueError); \
                 EVP_MD_CTX_free(ctx_p); \
                 return NULL; \
@@ -964,8 +1025,12 @@ generate_hash_name_list(void)
 #define INIT_CONSTRUCTOR_CONSTANTS(NAME)  do { \
     if (CONST_ ## NAME ## _name_obj == NULL) { \
         CONST_ ## NAME ## _name_obj = PyUnicode_FromString(#NAME); \
+        if (CONST_ ## NAME ## _name_obj == NULL) { \
+            Py_DECREF(m); \
+            return NULL; \
+        } \
     } \
-} while (0);
+} while (0)
 
 GEN_CONSTRUCTOR(md5)
 GEN_CONSTRUCTOR(sha1)
