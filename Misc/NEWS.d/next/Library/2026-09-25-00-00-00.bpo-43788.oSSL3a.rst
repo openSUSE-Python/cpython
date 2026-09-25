@@ -1,0 +1,6 @@
+The :mod:`ssl` and :mod:`hashlib` modules build against OpenSSL 1.0.2
+through 3.x. When built against OpenSSL 3 they use only the OpenSSL 3.0
+API: version-specific TLS methods, ``DH``/``EC_KEY`` parameter handling,
+``RAND_pseudo_bytes()`` and other deprecated functions are replaced, and
+digests are fetched from providers with ``EVP_MD_fetch()``. Certificate
+verification errors now include the reason for the failure.
