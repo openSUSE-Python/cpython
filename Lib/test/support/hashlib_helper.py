@@ -8,7 +8,7 @@ except ImportError:
     _hashlib = None
 
 
-def requires_hashdigest(digestname, openssl=None, usedforsecurity=True):
+def requires_hashdigest(digestname, openssl=None):
     """Decorator raising SkipTest if a hashing algorithm is not available
 
     The hashing algorithm could be missing or blocked by a strict crypto

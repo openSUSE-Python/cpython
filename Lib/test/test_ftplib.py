@@ -317,6 +317,10 @@ if ssl is not None:
 
         def secure_connection(self):
             context = ssl.SSLContext()
+            # TODO: fix TLSv1.3 support (bpo-32947). With TLS 1.3 the
+            # server only learns about a client-side certificate rejection
+            # after the handshake, so test_check_hostname hangs.
+            context.options |= getattr(ssl, 'OP_NO_TLSv1_3', 0)
             context.load_cert_chain(CERTFILE)
             socket = context.wrap_socket(self.socket,
                                          suppress_ragged_eofs=False,
