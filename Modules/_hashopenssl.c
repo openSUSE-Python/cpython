@@ -121,7 +121,7 @@ _setException(PyObject *exc)
 
     lib = ERR_lib_error_string(errcode);
 /* ERR_func_error_string() is deprecated since OpenSSL 3.0. */
-#if OPENSSL_VERSION_NUMBER < 0x30000000L
+#ifndef PY_OPENSSL_3_API
     func = ERR_func_error_string(errcode);
 #else
     func = NULL;
@@ -579,8 +579,7 @@ EVP_new(PyObject *self, PyObject *args, PyObject *kwdict)
     return ret_obj;
 }
 
-#if (OPENSSL_VERSION_NUMBER >= 0x10000000 && !defined(OPENSSL_NO_HMAC) \
-     && !defined(OPENSSL_NO_SHA))
+#if !defined(OPENSSL_NO_HMAC) && !defined(OPENSSL_NO_SHA)
 
 #define PY_PBKDF2_HMAC 1
 
@@ -774,7 +773,7 @@ pbkdf2_hmac(PyObject *self, PyObject *args, PyObject *kwdict)
 
 #endif
 
-#if OPENSSL_VERSION_NUMBER > 0x10100000L && !defined(OPENSSL_NO_SCRYPT) && !defined(LIBRESSL_VERSION_NUMBER)
+#if defined(PY_OPENSSL_1_1) && !defined(OPENSSL_NO_SCRYPT)
 #define PY_SCRYPT 1
 
 /* XXX: Parameters salt, n, r and p should be required keyword-only parameters.
