@@ -1472,6 +1472,10 @@ class SSLErrorTests(unittest.TestCase):
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLSv1)
         with self.assertRaises(ssl.SSLError) as cm:
             ctx.load_dh_params(CERTFILE)
+        if ssl._OPENSSL_API_VERSION >= (3, 0, 0):
+            # OpenSSL 3 parses DH parameters through the OSSL_DECODER API.
+            self.assertEqual(cm.exception.library, 'OSSL_DECODER')
+            return
         self.assertEqual(cm.exception.library, 'PEM')
         self.assertEqual(cm.exception.reason, 'NO_START_LINE')
         s = str(cm.exception)
