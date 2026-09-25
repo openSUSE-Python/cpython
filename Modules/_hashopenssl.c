@@ -23,6 +23,8 @@
 #include <openssl/objects.h>
 #include "openssl/err.h"
 
+#include "_ssl_compat.h"
+
 #include "clinic/_hashopenssl.c.h"
 /*[clinic input]
 module _hashlib
@@ -35,14 +37,11 @@ module _hashlib
 #define HASH_OBJ_CONSTRUCTOR 0
 #endif
 
-#if (OPENSSL_VERSION_NUMBER < 0x10100000L) || defined(LIBRESSL_VERSION_NUMBER)
-/* OpenSSL < 1.1.0 */
-#define EVP_MD_CTX_new EVP_MD_CTX_create
-#define EVP_MD_CTX_free EVP_MD_CTX_destroy
+#ifdef PY_OPENSSL_PRE_1_1
+/* OpenSSL < 1.1.0 and LibreSSL < 2.7.0 */
 #define HAS_FAST_PKCS5_PBKDF2_HMAC 0
 #include <openssl/hmac.h>
 #else
-/* OpenSSL >= 1.1.0 */
 #define HAS_FAST_PKCS5_PBKDF2_HMAC 1
 #endif
 
@@ -1010,7 +1009,7 @@ PyInit__hashlib(void)
 {
     PyObject *m, *openssl_md_meth_names;
 
-#ifndef OPENSSL_VERSION_1_1
+#ifdef PY_OPENSSL_PRE_1_1
     /* Load all digest algorithms and initialize cpuid */
     OPENSSL_add_all_algorithms_noconf();
     ERR_load_crypto_strings();
