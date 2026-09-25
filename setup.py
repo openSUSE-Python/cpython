@@ -863,57 +863,38 @@ class PyBuildExt(build_ext):
                                       '/usr/contrib/ssl/lib/'
                                      ] )
 
-        if (ssl_incs is not None and
-            ssl_libs is not None):
+        # find out which version of OpenSSL we have
+        openssl_ver = self._detect_openssl_version(inc_dirs +
+                                                   search_for_ssl_incs_in)
+        # Keep in sync with the check in Modules/_ssl_compat.h
+        min_openssl_ver = 0x10002000
+        have_any_openssl = ssl_incs is not None and ssl_libs is not None
+        have_usable_openssl = (have_any_openssl and
+                               openssl_ver >= min_openssl_ver)
+        if have_any_openssl and not have_usable_openssl:
+            print("warning: openssl 0x%08x is too old for _ssl and _hashlib, "
+                  "at least 0x%08x is required" %
+                  (openssl_ver, min_openssl_ver))
+
+        if have_usable_openssl:
             exts.append( Extension('_ssl', ['_ssl.c'],
                                    include_dirs = ssl_incs,
                                    library_dirs = ssl_libs,
                                    libraries = ['ssl', 'crypto'],
-                                   depends = ['socketmodule.h']), )
+                                   depends = ['socketmodule.h',
+                                              '_ssl_compat.h',
+                                              '_ssl_data.h',
+                                              '_ssl_data_111.h',
+                                              '_ssl_data_300.h']), )
+            # The _hashlib module wraps optimized implementations
+            # of hash functions from the OpenSSL library.
+            exts.append( Extension('_hashlib', ['_hashopenssl.c'],
+                                   depends = ['hashlib.h', '_ssl_compat.h'],
+                                   include_dirs = ssl_incs,
+                                   library_dirs = ssl_libs,
+                                   libraries = ['ssl', 'crypto']) )
         else:
-            missing.append('_ssl')
-
-        # find out which version of OpenSSL we have
-        openssl_ver = 0
-        openssl_ver_re = re.compile(
-            r'^\s*#\s*define\s+OPENSSL_VERSION_NUMBER\s+(0x[0-9a-fA-F]+)' )
-
-        # look for the openssl version header on the compiler search path.
-        opensslv_h = find_file('openssl/opensslv.h', [],
-                inc_dirs + search_for_ssl_incs_in)
-        if opensslv_h:
-            name = os.path.join(opensslv_h[0], 'openssl/opensslv.h')
-            if host_platform == 'darwin' and is_macosx_sdk_path(name):
-                name = os.path.join(macosx_sdk_root(), name[1:])
-            try:
-                with open(name, 'r') as incfile:
-                    for line in incfile:
-                        m = openssl_ver_re.match(line)
-                        if m:
-                            openssl_ver = int(m.group(1), 16)
-                            break
-            except IOError as msg:
-                print("IOError while reading opensshv.h:", msg)
-
-        #print('openssl_ver = 0x%08x' % openssl_ver)
-        min_openssl_ver = 0x00907000
-        have_any_openssl = ssl_incs is not None and ssl_libs is not None
-        have_usable_openssl = (have_any_openssl and
-                               openssl_ver >= min_openssl_ver)
-
-        if have_any_openssl:
-            if have_usable_openssl:
-                # The _hashlib module wraps optimized implementations
-                # of hash functions from the OpenSSL library.
-                exts.append( Extension('_hashlib', ['_hashopenssl.c'],
-                                       depends = ['hashlib.h'],
-                                       include_dirs = ssl_incs,
-                                       library_dirs = ssl_libs,
-                                       libraries = ['ssl', 'crypto']) )
-            else:
-                print("warning: openssl 0x%08x is too old for _hashlib" %
-                      openssl_ver)
-                missing.append('_hashlib')
+            missing.extend(['_ssl', '_hashlib'])
 
         # We always compile these even when OpenSSL is available (issue #14693).
         # It's harmless and the object code is tiny (40-50 KB per module,
@@ -1522,7 +1503,11 @@ class PyBuildExt(build_ext):
         #
         # More information on Expat can be found at www.libexpat.org.
         #
-        if '--with-system-expat' in sysconfig.get_config_var("CONFIG_ARGS"):
+        # Use the system libexpat if requested, or if the bundled copy has
+        # been removed from the source tree (as distributions often do).
+        expat_cfgargs = sysconfig.get_config_var("CONFIG_ARGS") or ''
+        if ('--with-system-expat' in expat_cfgargs or
+                not os.path.exists(os.path.join(srcdir, 'Modules', 'expat'))):
             expat_inc = []
             define_macros = []
             extra_compile_args = []
@@ -2097,6 +2082,41 @@ class PyBuildExt(build_ext):
         if sysconfig.get_config_var('HAVE_LIBDL'):
             # for dlopen, see bpo-32647
             ext.libraries.append('dl')
+
+    def _detect_openssl_version(self, search_dirs):
+        """Return OPENSSL_VERSION_NUMBER from openssl/opensslv.h, or 0.
+
+        OpenSSL < 3.0 and LibreSSL define OPENSSL_VERSION_NUMBER as a hex
+        literal; OpenSSL 3.0+ defines it as an expression of
+        OPENSSL_VERSION_MAJOR/MINOR/PATCH.
+        """
+        opensslv_h = find_file('openssl/opensslv.h', [], search_dirs)
+        if not opensslv_h:
+            return 0
+        name = os.path.join(opensslv_h[0], 'openssl/opensslv.h')
+        if host_platform == 'darwin' and is_macosx_sdk_path(name):
+            name = os.path.join(macosx_sdk_root(), name[1:])
+        number_re = re.compile(
+            r'^\s*#\s*define\s+OPENSSL_VERSION_NUMBER\s+(0x[0-9a-fA-F]+)')
+        part_re = re.compile(
+            r'^\s*#\s*define\s+OPENSSL_VERSION_(MAJOR|MINOR|PATCH)\s+(\d+)')
+        parts = {}
+        try:
+            with open(name, 'r') as incfile:
+                for line in incfile:
+                    m = number_re.match(line)
+                    if m:
+                        return int(m.group(1), 16)
+                    m = part_re.match(line)
+                    if m:
+                        parts[m.group(1)] = int(m.group(2))
+        except IOError as msg:
+            print("IOError while reading opensslv.h:", msg)
+            return 0
+        if 'MAJOR' in parts and 'MINOR' in parts:
+            return ((parts['MAJOR'] << 28) | (parts['MINOR'] << 20) |
+                    (parts.get('PATCH', 0) << 4) | 0xf)
+        return 0
 
     def _decimal_ext(self):
         extra_compile_args = []
