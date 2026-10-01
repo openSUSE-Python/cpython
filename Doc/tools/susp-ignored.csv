@@ -211,6 +211,7 @@ library/sqlite3,,:age,"cur.execute(""select * from people where name_last=:who a
 library/sqlite3,,:memory,
 library/sqlite3,,:who,"cur.execute(""select * from people where name_last=:who and age=:age"", {""who"": who, ""age"": age})"
 library/sqlite3,,:path,"db = sqlite3.connect('file:path/to/database?mode=ro', uri=True)"
+library/ssl,,:ALL,"context.set_ciphers(""@SECLEVEL=0:ALL"")"
 library/ssl,,:My,"Organizational Unit Name (eg, section) []:My Group"
 library/ssl,,:My,"Organization Name (eg, company) [Internet Widgits Pty Ltd]:My Organization, Inc."
 library/ssl,,:myserver,"Common Name (eg, YOUR name) []:myserver.mygroup.myorganization.com"

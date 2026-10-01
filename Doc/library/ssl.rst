@@ -28,6 +28,26 @@ probably additional platforms, as long as OpenSSL is installed on that platform.
    cause variations in behavior. For example, TLSv1.1 and TLSv1.2 come with
    openssl version 1.0.1.
 
+.. note::
+
+   This build of the module requires OpenSSL 1.0.2 or newer and supports
+   OpenSSL 3. When built against OpenSSL 3, only the OpenSSL 3.0 API is
+   used. Notable differences with OpenSSL 3:
+
+   * OpenSSL 3 refuses TLS 1.0 and TLS 1.1 at the default security level.
+     :data:`PROTOCOL_TLSv1` and :data:`PROTOCOL_TLSv1_1` contexts only
+     work after lowering it, e.g. with
+     ``context.set_ciphers("@SECLEVEL=0:ALL")``.
+   * :data:`PROTOCOL_TLSv1`, :data:`PROTOCOL_TLSv1_1` and
+     :data:`PROTOCOL_TLSv1_2` contexts are created from the generic TLS
+     method with both the minimum and maximum protocol version set to the
+     requested version. Like the version-specific methods used with
+     older OpenSSL, this overrides a ``MinProtocol`` set in the system-wide
+     OpenSSL configuration.
+   * :data:`OP_IGNORE_UNEXPECTED_EOF` is enabled by default.
+   * Errors from :meth:`SSLContext.load_dh_params` are reported by the
+     ``OSSL_DECODER`` library instead of ``PEM``.
+
 .. warning::
    Don't use this module without reading the :ref:`ssl-security`.  Doing so
    may lead to a false sense of security, as the default settings of the
@@ -843,6 +863,27 @@ Constants
    Prevent client side from requesting a session ticket.
 
    .. versionadded:: 3.6
+
+.. data:: OP_IGNORE_UNEXPECTED_EOF
+
+   Ignore unexpected shutdown of TLS connections: an EOF from the peer
+   without a TLS ``close_notify`` alert is treated like a regular
+   shutdown instead of raising :exc:`SSLEOFError`. This mirrors the
+   behaviour of OpenSSL 1.1.1 and is enabled by default on every
+   :class:`SSLContext`.
+
+   .. warning::
+
+      With this option an attacker able to close the connection can
+      truncate the data stream without being detected. Protocols that do
+      not delimit their messages themselves (e.g. HTTP/1.0 responses
+      without ``Content-Length``) should clear it:
+      ``context.options &= ~ssl.OP_IGNORE_UNEXPECTED_EOF``.
+
+   This option is only available with OpenSSL 3.0.0 and later.
+
+   .. versionadded:: 3.6.15
+      Backported for OpenSSL 3 support (added in Python 3.10).
 
 .. data:: HAS_ALPN
 

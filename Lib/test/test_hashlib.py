@@ -29,6 +29,22 @@ COMPILED_WITH_PYDEBUG = hasattr(sys, 'gettotalrefcount')
 c_hashlib = import_fresh_module('hashlib', fresh=['_hashlib'])
 py_hashlib = import_fresh_module('hashlib', blocked=['_hashlib'])
 
+
+def get_fips_mode():
+    """Return 1 if the kernel runs in FIPS mode, 0 otherwise.
+
+    Python 3.6's _hashlib has no get_fips_mode(); OpenSSL follows the
+    kernel setting on distributions that support FIPS; SUSE's OpenSSL
+    can also be forced into FIPS mode with OPENSSL_FORCE_FIPS_MODE.
+    """
+    if os.environ.get('OPENSSL_FORCE_FIPS_MODE', '0') not in ('', '0'):
+        return 1
+    try:
+        with open('/proc/sys/crypto/fips_enabled') as f:
+            return int(f.read().strip() or 0)
+    except (OSError, ValueError):
+        return 0
+
 try:
     import _blake2
 except ImportError:
@@ -950,6 +966,7 @@ class KDFTests(unittest.TestCase):
 
     @unittest.skipUnless(hasattr(c_hashlib, 'scrypt'),
                      '   test requires OpenSSL > 1.1')
+    @unittest.skipIf(get_fips_mode(), reason="scrypt is blocked in FIPS mode")
     def test_scrypt(self):
         for password, salt, n, r, p, expected in self.scrypt_test_vectors:
             result = hashlib.scrypt(password, salt=salt, n=n, r=r, p=p)
