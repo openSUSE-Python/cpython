@@ -2,7 +2,7 @@
 preserve
 [clinic start generated code]*/
 
-#if (OPENSSL_VERSION_NUMBER > 0x10100000L && !defined(OPENSSL_NO_SCRYPT) && !defined(LIBRESSL_VERSION_NUMBER))
+#if (defined(PY_OPENSSL_1_1) && !defined(OPENSSL_NO_SCRYPT))
 
 PyDoc_STRVAR(_hashlib_scrypt__doc__,
 "scrypt($module, /, password, *, salt=None, n=None, r=None, p=None,\n"
@@ -52,9 +52,9 @@ exit:
     return return_value;
 }
 
-#endif /* (OPENSSL_VERSION_NUMBER > 0x10100000L && !defined(OPENSSL_NO_SCRYPT) && !defined(LIBRESSL_VERSION_NUMBER)) */
+#endif /* (defined(PY_OPENSSL_1_1) && !defined(OPENSSL_NO_SCRYPT)) */
 
 #ifndef _HASHLIB_SCRYPT_METHODDEF
     #define _HASHLIB_SCRYPT_METHODDEF
 #endif /* !defined(_HASHLIB_SCRYPT_METHODDEF) */
-/*[clinic end generated code: output=118cd7036fa0fb52 input=a9049054013a1b77]*/
+/*[clinic end generated code: output=818459ca3c3ed2f6 input=a9049054013a1b77]*/
