@@ -1,12 +1,15 @@
 name: Tests
 
-# Cancel in-progress runs for the same PR.
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 
 on:
   pull_request:
+  workflow_dispatch:
 
 jobs:
   check_source:
@@ -17,113 +20,146 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-            fetch-depth: 1000
+          fetch-depth: 1000
       - name: Check for source changes
         id: check
+        shell: bash
         run: |
           if [ -z "$GITHUB_BASE_REF" ]; then
             echo "run_tests=true" >> "$GITHUB_OUTPUT"
           else
-            git fetch origin $GITHUB_BASE_REF --depth=1
-            git diff --name-only origin/$GITHUB_BASE_REF.. | grep -qvE '(\.rst$|^Doc|^Misc)' && echo "run_tests=true" >> "$GITHUB_OUTPUT" || true
+            git fetch origin "$GITHUB_BASE_REF" --depth=1
+            git --no-pager diff --name-only "origin/$GITHUB_BASE_REF".. > /tmp/changed-files
+            if grep -vE '(\.rst$|^Doc/)' /tmp/changed-files; then
+              echo "run_tests=true" >> "$GITHUB_OUTPUT"
+            fi
           fi
 
   opensuse-tests:
     name: '${{ matrix.name }} (openSUSE Leap)'
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     needs: check_source
     if: needs.check_source.outputs.run_tests == 'true'
-    # Use a specific image version for reproducible builds
     container:
       image: opensuse/leap:15.6
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
         include:
           - name: 'Check ABI'
-            task: 'abi'
+            task: abi
+            mode: abi
           - name: 'Check Generated Files'
-            task: 'generated-files'
-          - name: 'Build and Test'
-            task: 'build-and-test'
+            task: generated-files
+            mode: debug
+          - name: 'Debug build and tests'
+            task: tests
+            mode: debug
+          - name: 'SUSE release build and tests'
+            task: tests
+            mode: release
 
     env:
-      OPENSSL_VER: 1.1.1u
+      # Shared builds need the in-tree libpython for all invocations.
+      LD_LIBRARY_PATH: ${{ github.workspace }}
+      SLE_VERSION: '150600'
 
     steps:
+      - name: Install Git and Tar
+        run: |
+          zypper ref
+          zypper -n install -y git-core tar
 
-    - name: Install Git and Tar
-      run: |
-        zypper ref
-        zypper -n install -y git-core tar
+      - uses: actions/checkout@v4
 
-    - uses: actions/checkout@v4
+      - name: Trust the checked-out workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-    - name: Trust the checked-out workspace
-      # checkout configures a temporary HOME, not the HOME used by shell steps.
-      run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Install dependencies
+        run: sh -x ./.github/posix-deps-zypp.sh
 
-    - name: Install All Dependencies
-      run: sh -x ./.github/posix-deps-zypp.sh
+      - name: Record build environment
+        run: |
+          mkdir -p ci-results
+          {
+            uname -a
+            rpm -qa --qf '%{NAME} %{VERSION}-%{RELEASE} %{ARCH}\n' | sort
+            zypper lr -u
+            gcc --version
+            pkg-config --modversion openssl expat libffi sqlite3
+          } | tee ci-results/environment.txt
 
-    - name: 'Restore OpenSSL build'
-      if: matrix.task == 'build-and-test'
-      id: cache-openssl
-      uses: actions/cache@v4
-      with:
-        path: ./multissl/openssl/${{ env.OPENSSL_VER }}
-        key: opensuse-leap-multissl-openssl-${{ env.OPENSSL_VER }}
+      - name: Configure CPython
+        run: |
+          # The generated-files gate checks regen-all, not Autoconf output.
+          # configure and pyconfig.h.in are regenerated for the other builds.
+          if [ '${{ matrix.task }}' != generated-files ]; then
+            autoconf -Wall
+            autoheader -Wall
+          fi
+          sh .github/configure-suse.sh '${{ matrix.mode }}' 2>&1 | tee ci-results/configure.txt
+          if grep -q 'unrecognized options' ci-results/configure.txt; then
+            echo 'configure ignored an option' >&2
+            exit 1
+          fi
 
-    # === Steps for ABI Check ===
-    - name: Build CPython for ABI Check
-      if: matrix.task == 'abi'
-      env:
-        CFLAGS: -g3 -O0
-      run: |
-        ./configure --enable-shared --with-fpectl --with-system-expat
-        make -j4
+      - name: Build CPython
+        # --enable-optimizations selects profile-opt in release mode.
+        run: make -j4 2>&1 | tee ci-results/build.txt
 
-    - name: Check for changes in the ABI
-      if: matrix.task == 'abi'
-      run: make check-abidump
+      - name: Verify build configuration and libraries
+        run: |
+          ./python .github/check-build.py '${{ matrix.mode }}' 2>&1 | tee ci-results/build-check.txt
+          make pythoninfo 2>&1 | tee ci-results/pythoninfo.txt
 
-    # === Steps for Generated Files Check ===
-    - name: Build CPython for Generated Files Check
-      if: matrix.task == 'generated-files'
-      run: |
-        ./configure --with-pydebug --with-system-expat
-        make -j4 regen-all
+      - name: Check for changes in the ABI
+        if: matrix.task == 'abi'
+        run: make check-abidump 2>&1 | tee ci-results/abi.txt
 
-    - name: Check for changes in generated files
-      if: matrix.task == 'generated-files'
-      run: |
-        git status --short
-        git diff --exit-code
+      - name: Regenerate files
+        if: matrix.task == 'generated-files'
+        # Use this Python 3.6 build for the older generator scripts.
+        run: make -j4 regen-all PYTHON_FOR_REGEN=./python
 
-    - name: Check exported libpython symbols
-      if: matrix.task == 'generated-files'
-      run: make smelly
+      - name: Check for changes in generated files
+        if: matrix.task == 'generated-files'
+        run: |
+          git status --short
+          git --no-pager diff --exit-code
 
-    # === Steps for Full Build and Test ===
-    - name: Install OpenSSL
-      if: matrix.task == 'build-and-test' && steps.cache-openssl.outputs.cache-hit != 'true'
-      run: python3 Tools/ssl/multissltests.py --steps=library --base-directory $PWD/multissl --openssl $OPENSSL_VER --system Linux
+      - name: Check exported libpython symbols
+        if: matrix.task == 'generated-files'
+        run: make smelly
 
-    - name: Configure CPython
-      if: matrix.task == 'build-and-test'
-      run: |
-        autoconf -Wall
-        autoheader -Wall
-        ./configure --with-pydebug --with-openssl=$PWD/multissl/openssl/$OPENSSL_VER --with-system-expat
+      - name: Prepare unprivileged test user
+        if: matrix.task == 'tests'
+        # OBS runs as abuild, not root. This also avoids testing container UID maps.
+        run: |
+          useradd --create-home abuild
+          chown -R abuild "$GITHUB_WORKSPACE"
 
-    - name: Build CPython
-      if: matrix.task == 'build-and-test'
-      run: make -j4
+      - name: Run broad regression tests
+        if: matrix.task == 'tests'
+        run: runuser -u abuild -- env LD_LIBRARY_PATH="$PWD" xvfb-run -a make buildbottest TESTOPTS="-j4 -uall,-cpu" 2>&1 | tee ci-results/tests.txt
 
-    - name: Display build info
-      if: matrix.task == 'build-and-test'
-      run: make pythoninfo
+      - name: Run OBS-style regression tests
+        if: matrix.task == 'tests' && matrix.mode == 'release'
+        # A separate parity pass; do not exclude these suites from the broad pass.
+        run: |
+          ulimit -v 10000000
+          runuser -u abuild -- env LD_LIBRARY_PATH="$PWD" make -j1 test TESTOPTS="-j4 -u curses -v -x test_gdb test_pydoc test_capi test_uuid --timeout=3000" 2>&1 | tee ci-results/obs-tests.txt
 
-    - name: Run tests
-      if: matrix.task == 'build-and-test'
-      run: xvfb-run make buildbottest TESTOPTS="-j4 -uall,-cpu"
+      - name: Save build evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-evidence-${{ matrix.task }}-${{ matrix.mode }}
+          path: |
+            ci-results/
+            config.log
+            pyconfig.h
+          if-no-files-found: warn
